@@ -1,0 +1,277 @@
+// ─────────────────────────────────────────────────────────────
+//  main.js — 게임 루프, 입력, DOM UI (HUD·상점·메뉴)
+// ─────────────────────────────────────────────────────────────
+const $ = s => document.querySelector(s);
+const cv = $('#cv'), ctx = cv.getContext('2d');
+const board = $('#board'), panel = $('#panel'), overlay = $('#overlay'), shop = $('#shop');
+const STEP = 1 / 60;
+
+let game = new Game(MAPS[0]); // 메뉴 뒤 배경으로도 쓰인다
+let running = false, paused = false, ended = false, speed = 1, scale = 1, acc = 0, last = performance.now();
+const ui = { build: null, hover: null, valid: false, selected: null, hoverKey: '' };
+
+// ── 최고 기록 (localStorage) ─────────────────────────────────
+const BEST_KEY = 'neon-bastion.best';
+function loadBest() { try { return JSON.parse(localStorage.getItem(BEST_KEY)) || {}; } catch (e) { return {}; } }
+function saveBest(id, wave) {
+  const b = loadBest();
+  if (wave > (b[id] || 0)) { b[id] = wave; try { localStorage.setItem(BEST_KEY, JSON.stringify(b)); } catch (e) { /* 저장 불가 환경 */ } }
+}
+const clearedWaves = () => game.state === 'wave' || game.state === 'lost' ? game.wave - 1 : game.wave;
+
+// ── 화면 크기 대응: 논리 해상도 960×560을 창에 맞게 확대 ──────
+function fit() {
+  const st = $('#stage'), s = Math.max(0.2, Math.min((st.clientWidth - 20) / W, (st.clientHeight - 20) / H));
+  board.style.width = W * s + 'px'; board.style.height = H * s + 'px';
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(W * s * dpr); cv.height = Math.round(H * s * dpr);
+  scale = cv.width / W;
+}
+window.addEventListener('resize', fit);
+
+// ── 상점 ────────────────────────────────────────────────────
+function buildShop() {
+  shop.innerHTML = '';
+  for (const [type, def] of Object.entries(TOWERS)) {
+    const b = document.createElement('button');
+    b.className = 'card'; b.dataset.type = type;
+    b.innerHTML = `<canvas width="88" height="88"></canvas><div><div class="nm">${def.name}</div><div class="cost">${def.levels[0].cost} G</div></div><kbd>${def.key}</kbd>`;
+    const ic = b.querySelector('canvas').getContext('2d');
+    ic.scale(2, 2);
+    drawTower(ic, type, 0, 22, 22, -Math.PI / 4, 0, 0);
+    b.onclick = () => setBuild(ui.build === type ? null : type);
+    b.onmouseenter = () => { tip.textContent = `${def.name} — ${def.desc}`; };
+    b.onmouseleave = showDefaultTip;
+    shop.appendChild(b);
+  }
+  shop.appendChild(tip);
+  showDefaultTip();
+}
+const tip = Object.assign(document.createElement('div'), { id: 'tip' });
+function showDefaultTip() {
+  tip.textContent = ui.build ? `${TOWERS[ui.build].name} — ${TOWERS[ui.build].desc}  (우클릭·Esc: 취소)`
+    : '타워를 골라 빈 칸에 배치하세요. 타워는 길을 막아 적의 경로를 바꿉니다.';
+}
+
+function setBuild(type) {
+  ui.build = type; ui.selected = null; ui.hoverKey = '';
+  shop.querySelectorAll('.card').forEach(c => c.classList.toggle('on', c.dataset.type === type));
+  showDefaultTip();
+}
+
+// ── 입력 ────────────────────────────────────────────────────
+function cellAt(ev) {
+  const r = cv.getBoundingClientRect();
+  const c = Math.floor((ev.clientX - r.left) / r.width * COLS), row = Math.floor((ev.clientY - r.top) / r.height * ROWS);
+  return inb(c, row) ? [c, row] : null;
+}
+cv.addEventListener('pointermove', ev => { ui.hover = cellAt(ev); });
+cv.addEventListener('pointerleave', () => { ui.hover = null; });
+cv.addEventListener('contextmenu', ev => ev.preventDefault());
+cv.addEventListener('pointerdown', ev => {
+  if (!running || ended) return;
+  Sfx.init();
+  if (ev.button === 2) { setBuild(null); return; }
+  const cell = ui.hover = cellAt(ev);
+  if (!cell) return;
+  const [c, r] = cell;
+  if (ui.build) {
+    if (game.build(ui.build, c, r)) return;
+    const t = game.towerAt(c, r); // 건설 모드에서도 기존 타워를 누르면 선택으로 전환
+    if (t) { setBuild(null); ui.selected = t; }
+    else game.fx.text(cx(c), cx(r), game.gold < TOWERS[ui.build].levels[0].cost ? '골드 부족' : '배치 불가', '#ff5d73');
+  } else {
+    ui.selected = game.towerAt(c, r) || null;
+  }
+});
+
+panel.addEventListener('click', ev => {
+  const act = ev.target.closest('button')?.dataset.act, t = ui.selected;
+  if (!act || !t) return;
+  if (act === 'up') game.upgrade(t);
+  else if (act === 'sell') { game.sell(t); ui.selected = null; }
+  else if (act === 'mode') cycleMode(t);
+});
+function cycleMode(t) {
+  const keys = Object.keys(TARGET_MODES);
+  t.mode = keys[(keys.indexOf(t.mode) + 1) % keys.length];
+}
+
+window.addEventListener('keydown', ev => {
+  if (!running || ended || ev.repeat) return;
+  const k = ev.key.toLowerCase(), t = ui.selected;
+  const type = Object.keys(TOWERS).find(n => TOWERS[n].key === k);
+  if (type) setBuild(ui.build === type ? null : type);
+  else if (k === 'escape') { setBuild(null); }
+  else if (k === ' ') { ev.preventDefault(); togglePause(); }
+  else if (k === 'f') cycleSpeed();
+  else if (k === 'n') game.startWave();
+  else if (k === 'm') toggleMute();
+  else if (k === 'u' && t) game.upgrade(t);
+  else if (k === 't' && t) cycleMode(t);
+  else if (k === 'x' && t) { game.sell(t); ui.selected = null; }
+});
+
+$('#btnWave').onclick = () => { Sfx.init(); game.startWave(); };
+$('#btnSpeed').onclick = cycleSpeed;
+$('#btnPause').onclick = togglePause;
+$('#btnMute').onclick = toggleMute;
+$('#btnMenu').onclick = () => { saveBest(game.map.id, clearedWaves()); showMenu(); };
+
+function cycleSpeed() { speed = speed === 1 ? 2 : speed === 2 ? 4 : 1; $('#btnSpeed').textContent = `×${speed}`; }
+function togglePause() { if (!running || ended) return; paused = !paused; $('#btnPause').textContent = paused ? '계속하기' : '일시정지'; }
+function toggleMute() { Sfx.muted = !Sfx.muted; $('#btnMute').textContent = Sfx.muted ? '소리 끔' : '소리 켬'; }
+
+// ── HUD 동기화: 값이 바뀐 요소만 DOM 갱신 ─────────────────────
+const cache = {};
+function set(id, value, prop = 'textContent') {
+  if (cache[id + prop] === value) return;
+  cache[id + prop] = value; $(id)[prop] = value;
+}
+
+function syncUI() {
+  set('#lives', String(Math.max(0, game.lives)));
+  set('#gold', String(game.gold));
+  set('#wave', game.endless ? `${game.wave}` : `${game.wave} / ${TOTAL_WAVES}`);
+
+  const inWave = game.state === 'wave';
+  set('#btnWave', !running || inWave || ended, 'disabled');
+  set('#btnWave', inWave ? '전투 중…' : game.countdown > 0
+    ? `지금 호출 +${Math.ceil(game.countdown) * 2}G <kbd>N</kbd>` : '웨이브 시작 <kbd>N</kbd>', 'innerHTML');
+
+  // 다음(또는 현재) 웨이브 구성 미리보기
+  const w = inWave ? game.wave : game.wave + 1;
+  set('#preview', (inWave ? '현재' : '다음') + ' ' + genWave(w).map(g =>
+    `<span class="en"><i class="dot" style="background:${ENEMIES[g.type].color}"></i>${ENEMIES[g.type].name}×${g.count}</span>`).join(''), 'innerHTML');
+
+  for (const c of shop.querySelectorAll('.card'))
+    c.classList.toggle('poor', game.gold < TOWERS[c.dataset.type].levels[0].cost);
+
+  // 배치 가능 여부는 커서 칸이나 지형이 바뀔 때만 재계산 (BFS 비용 절약)
+  if (ui.build && ui.hover) {
+    const key = ui.hover.join() + ':' + game.version + ':' + (game.enemies.length ? Math.floor(game.time * 4) : 0);
+    if (key !== ui.hoverKey) { ui.hoverKey = key; ui.valid = game.canBuild(ui.hover[0], ui.hover[1]); }
+  }
+
+  syncPanel();
+}
+
+function syncPanel() {
+  const t = ui.selected;
+  if (!t || !game.towers.includes(t)) { ui.selected = null; set('#panel', true, 'hidden'); return; }
+  const s = t.def.levels[t.level], n = t.def.levels[t.level + 1], cost = game.upgradeCost(t);
+  const row = (label, cur, nxt, unit = '') =>
+    `<tr><td>${label}</td><td>${cur}${unit}${nxt != null && nxt !== cur ? ` <span class="up">→ ${nxt}${unit}</span>` : ''}</td></tr>`;
+  const rows = [row(t.type === 'frost' ? '초당 피해' : '피해', s.dmg, n?.dmg), row('사거리', s.range, n?.range)];
+  if (s.rate) rows.push(row('공격 간격', s.rate.toFixed(2), n?.rate.toFixed(2), '초'));
+  if (s.splash) rows.push(row('폭발 반경', s.splash, n?.splash));
+  if (s.slow) rows.push(row('감속', Math.round(s.slow * 100), n && Math.round(n.slow * 100), '%'));
+  if (s.chain) rows.push(row('연쇄', s.chain, n?.chain, '회'));
+  const html = `<h3 style="color:${t.def.color}">${t.def.name}<small>Lv.${t.level + 1}</small></h3><table>${rows.join('')}</table>` +
+    (t.type !== 'frost' ? `<div class="row"><button data-act="mode">조준: ${TARGET_MODES[t.mode]} <kbd>T</kbd></button></div>` : '') +
+    `<div class="row"><button data-act="up" class="primary" ${cost == null || game.gold < cost ? 'disabled' : ''}>${cost == null ? '최대 레벨' : `강화 ${cost}G`} <kbd>U</kbd></button>` +
+    `<button data-act="sell" class="danger">판매 +${Math.floor(t.spent * SELL_RATIO)}G <kbd>X</kbd></button></div>`;
+  set('#panel', html, 'innerHTML');
+  set('#panel', false, 'hidden');
+  // 타워를 가리지 않도록 반대편에 배치
+  panel.style.left = t.x > W / 2 ? '10px' : ''; panel.style.right = t.x > W / 2 ? '' : '10px';
+}
+
+// ── 메뉴·결과 화면 ──────────────────────────────────────────
+function showMenu() {
+  running = false; ended = false; paused = false; setBuild(null);
+  const best = loadBest();
+  overlay.innerHTML = `<div class="modal">
+    <h1>NEON<b>BASTION</b></h1>
+    <p>타워로 미로를 설계해 ${TOTAL_WAVES}번의 웨이브로부터 코어를 지켜라</p>
+    <div class="maps">${MAPS.map((m, i) => `
+      <button class="map" data-map="${i}">
+        <canvas width="480" height="280"></canvas>
+        <div class="t">${m.name}<em>${m.diff}</em></div>
+        <div class="d">${m.desc}</div>
+        <div class="b">${best[m.id] ? `최고 기록: 웨이브 ${best[m.id]}` : '기록 없음'}</div>
+      </button>`).join('')}</div>
+    <div class="help">
+      <kbd>1</kbd>–<kbd>5</kbd> 타워 선택 · 클릭으로 배치 · <kbd>U</kbd> 강화 · <kbd>X</kbd> 판매 · <kbd>T</kbd> 조준 변경<br>
+      <kbd>N</kbd> 웨이브 호출 · <kbd>F</kbd> 배속 · <kbd>Space</kbd> 일시정지 · <kbd>M</kbd> 소리
+    </div></div>`;
+  overlay.querySelectorAll('.map').forEach(b => {
+    const m = MAPS[b.dataset.map];
+    drawThumb(b.querySelector('canvas').getContext('2d'), m);
+    b.onclick = () => startGame(m);
+  });
+  overlay.classList.add('show');
+}
+
+function drawThumb(c, m) {
+  const s = 20;
+  c.fillStyle = '#0a0e1a'; c.fillRect(0, 0, 480, 280);
+  c.fillStyle = '#263150';
+  for (const [x, y, w, h] of m.rocks) c.fillRect(x * s + 1, y * s + 1, w * s - 2, h * s - 2);
+  const g = new Game(m); // 실제 경로탐색 결과를 썸네일에 그대로 표시
+  c.strokeStyle = '#ff5d7399'; c.lineWidth = 2.5; c.setLineDash([5, 5]);
+  for (const p of g.paths) { c.beginPath(); p.forEach(([x, y], i) => c[i ? 'lineTo' : 'moveTo'](x * s + 10, y * s + 10)); c.stroke(); }
+  c.fillStyle = '#ff5d73';
+  for (const [x, y] of m.spawns) { c.beginPath(); c.arc(x * s + 10, y * s + 10, 6, 0, TAU); c.fill(); }
+  c.fillStyle = '#4cc9f0'; poly(c, m.core[0] * s + 10, m.core[1] * s + 10, 9, 6); c.fill();
+}
+
+function startGame(map) {
+  Sfx.init();
+  game = new Game(map);
+  running = true; ended = false; paused = false; acc = 0;
+  ui.selected = null; setBuild(null);
+  $('#btnPause').textContent = '일시정지';
+  overlay.classList.remove('show');
+}
+
+function showEnd() {
+  const won = game.state === 'won';
+  saveBest(game.map.id, clearedWaves());
+  overlay.innerHTML = `<div class="modal">
+    <h2 class="${won ? 'win' : 'lose'}">${won ? '방어 성공' : '코어 파괴됨'}</h2>
+    <p>${game.map.name} · ${won ? `${TOTAL_WAVES}개 웨이브를 모두 막아냈습니다` : `웨이브 ${game.wave}에서 무너졌습니다`}</p>
+    <div class="results">
+      <div><b>${clearedWaves()}</b><span>클리어한 웨이브</span></div>
+      <div><b>${game.kills}</b><span>처치</span></div>
+      <div><b>${Math.max(0, game.lives)}</b><span>남은 내구도</span></div>
+    </div>
+    <div class="actions">
+      ${won ? '<button class="primary" data-act="endless">무한 모드로 계속</button>' : ''}
+      <button class="${won ? '' : 'primary'}" data-act="retry">다시 도전</button>
+      <button data-act="menu">맵 선택</button>
+    </div></div>`;
+  overlay.querySelector('.actions').onclick = ev => {
+    const act = ev.target.dataset.act;
+    if (act === 'retry') startGame(game.map);
+    else if (act === 'menu') showMenu();
+    else if (act === 'endless') {
+      game.endless = true; game.state = 'build'; game.countdown = 10;
+      ended = false; overlay.classList.remove('show');
+    }
+  };
+  overlay.classList.add('show');
+}
+
+// ── 게임 루프: 누적 시간을 고정 스텝으로 소비 ─────────────────
+function frame(now) {
+  const real = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  if (running && !paused) {
+    acc += real * speed;
+    for (let n = 0; acc >= STEP && n < 16; n++) { game.update(STEP); acc -= STEP; }
+    if (acc > STEP * 16) acc = 0; // 탭 복귀 등으로 밀린 시간은 버린다
+    if (!ended && (game.state === 'won' || game.state === 'lost')) {
+      ended = true; setBuild(null);
+      setTimeout(showEnd, 1100);
+    }
+  }
+  render(ctx, game, ui, scale);
+  syncUI();
+  requestAnimationFrame(frame);
+}
+
+buildShop();
+fit();
+showMenu();
+requestAnimationFrame(frame);
