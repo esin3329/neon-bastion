@@ -2,6 +2,8 @@
 
 타워로 **미로를 직접 설계**하는 타워 디펜스. 프레임워크·빌드 도구·외부 에셋 없이 순수 JavaScript와 Canvas 2D, WebAudio만으로 만들었습니다.
 
+**▶ [브라우저에서 바로 플레이](https://esin3329.github.io/neon-bastion/)**
+
 ## 실행
 
 `index.html`을 브라우저로 열면 바로 실행됩니다. (선택) 로컬 서버로 띄우려면:
