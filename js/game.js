@@ -18,13 +18,14 @@ class Game {
     this.spawns = map.spawns;
     this.core = map.core;
     this.coreX = cx(map.core[0]); this.coreY = cx(map.core[1]);
-    this.towers = []; this.enemies = []; this.shots = [];
+    this.towers = []; this.enemies = []; this.shots = []; this.zones = [];
     this.fx = new Effects();
     this.gold = START_GOLD; this.lives = START_LIVES;
     this.wave = 0; this.kills = 0; this.time = 0;
     this.state = 'build';      // build | wave | won | lost
     this.countdown = -1;       // 다음 웨이브 자동 시작까지 남은 시간(-1: 대기)
-    this.queue = []; this.waveT = 0;
+    this.queue = []; this.waveT = 0; this.mod = null;
+    this.cds = { strike: 0, stasis: 0 };
     this.endless = false;
     this.version = 0;          // 지형이 바뀔 때마다 증가 (UI 캐시 무효화용)
     this.refreshField();
@@ -76,7 +77,7 @@ class Game {
     return best;
   }
 
-  // ── 건설 ────────────────────────────────────────────────────
+  // ── 건설·강화 ───────────────────────────────────────────────
   towerAt(c, r) { return this.towers.find(t => t.c === c && t.r === r); }
 
   // 길을 완전히 막는 배치는 허용하지 않는다 (임시로 막아 보고 BFS로 검증)
@@ -97,7 +98,7 @@ class Game {
     const def = TOWERS[type], cost = def.levels[0].cost;
     if (this.gold < cost || !this.canBuild(c, r)) return null;
     this.gold -= cost;
-    const t = { type, def, level: 0, c, r, x: cx(c), y: cx(r), cd: 0, ang: -Math.PI / 2, mode: 'first', spent: cost, flash: 0 };
+    const t = { type, def, level: 0, branch: null, c, r, x: cx(c), y: cx(r), cd: 0, ang: -Math.PI / 2, mode: 'first', spent: cost, dealt: 0, flash: 0 };
     this.towers.push(t);
     this.grid[idx(c, r)] = 2;
     this.refreshField();
@@ -106,14 +107,26 @@ class Game {
     return t;
   }
 
-  upgradeCost(t) { const n = t.def.levels[t.level + 1]; return n ? n.cost : null; }
+  // 현재 레벨의 능력치 (3레벨은 고른 특화의 능력치)
+  stats(t) { return t.level < 2 ? t.def.levels[t.level] : t.def.branches[t.branch]; }
 
-  upgrade(t) {
-    const cost = this.upgradeCost(t);
+  // 1레벨 → 2레벨은 단일 강화, 2레벨 → 3레벨은 특화 b(0 또는 1)를 골라야 한다
+  upgradeCost(t, b = 0) {
+    if (t.level === 0) return t.def.levels[1].cost;
+    if (t.level === 1) return t.def.branches[b].cost;
+    return null;
+  }
+
+  upgrade(t, b) {
+    if (t.level === 1 && b == null) return false;
+    const cost = this.upgradeCost(t, b || 0);
     if (cost == null || this.gold < cost) return false;
-    this.gold -= cost; t.spent += cost; t.level++;
+    this.gold -= cost; t.spent += cost;
+    if (t.level === 1) t.branch = b;
+    t.level++; t.cd = 0;
     this.fx.ring(t.x, t.y, 36, '#ffffff');
     this.fx.burst(t.x, t.y, t.def.color, 14, 90);
+    if (t.branch != null) this.fx.text(t.x, t.y - 22, t.def.branches[t.branch].name, '#ffd166');
     Sfx.play('upgrade');
     return true;
   }
@@ -127,6 +140,30 @@ class Game {
     Sfx.play('sell');
   }
 
+  // ── 액티브 스킬 ─────────────────────────────────────────────
+  useSkill(id, x, y) {
+    if (this.cds[id] > 0 || this.state === 'won' || this.state === 'lost') return false;
+    const sk = SKILLS[id];
+    if (id === 'strike') {
+      const dmg = sk.power * this.hpScale(Math.max(1, this.wave));
+      for (const e of this.enemies)
+        if (e.alive && Math.hypot(e.x - x, e.y - y) <= sk.radius + e.def.r) this.damage(e, dmg, null, true);
+      this.fx.beam([[x, -20], [x, y]], sk.color, 10, 0.35);
+      this.fx.ring(x, y, sk.radius, sk.color, 0.5);
+      this.fx.ring(x, y, sk.radius * 0.6, '#ffffff', 0.3);
+      this.fx.burst(x, y, sk.color, 50, 260);
+      this.fx.shake = 12;
+      Sfx.play('boom'); Sfx.play('rail');
+    } else if (id === 'stasis') {
+      for (const e of this.enemies) e.stunT = Math.max(e.stunT, e.type === 'boss' ? sk.dur / 2 : sk.dur);
+      this.fx.ring(this.coreX, this.coreY, Math.hypot(W, H), sk.color, 0.8);
+      this.fx.text(this.coreX, this.coreY - 30, '시간 정지', sk.color);
+      Sfx.play('freeze');
+    }
+    this.cds[id] = sk.cd;
+    return true;
+  }
+
   // ── 웨이브 ──────────────────────────────────────────────────
   startWave() {
     if (this.state !== 'build') return;
@@ -136,25 +173,47 @@ class Game {
       this.fx.text(this.coreX, this.coreY - 30, `조기 호출 +${bonus}`, '#ffd166');
     }
     this.wave++;
+    const wv = genWave(this.wave);
+    this.mod = wv.mod;
     this.queue = [];
-    genWave(this.wave).forEach((g, gi) => {
+    wv.groups.forEach((g, gi) => {
       for (let i = 0; i < g.count; i++)
         this.queue.push({ t: g.delay + i * g.gap, type: g.type, spawn: (gi + i) % this.spawns.length });
     });
     this.queue.sort((a, b) => a.t - b.t);
     this.waveT = 0; this.countdown = -1;
     this.state = 'wave';
+    if (this.mod) this.fx.text(this.coreX, this.coreY - 46, `변이: ${MODS[this.mod].name}`, MODS[this.mod].color);
     Sfx.play(this.wave % 10 === 0 ? 'boss' : 'wave');
   }
 
-  spawn(type, si) {
-    const def = ENEMIES[type], [c, r] = this.spawns[si], m = hpMult(this.wave) * (this.map.hp || 1);
-    this.enemies.push({
-      type, def, x: cx(c), y: cx(r), c, r, tc: c, tr: r,
-      hp: def.hp * m, maxHp: def.hp * m, armor: (def.armor || 0) * (1 + this.wave * 0.08),
-      flying: !!def.flying, slow: 0, slowT: 0, hitT: 0, prog: 0, ang: 0, alive: true,
+  // 적 체력 배율: 웨이브 곡선 × 맵 배율 (맵 배율은 20웨이브에 걸쳐 서서히 적용 — 초반 학습 구간은 모든 맵이 비슷하게)
+  hpScale(w) { return hpMult(w) * (1 + ((this.map.hp || 1) - 1) * Math.min(1, (w - 1) / 20)); }
+
+  // from: 분열체처럼 다른 적의 위치에서 태어날 때 그 적
+  spawn(type, si, from) {
+    const def = ENEMIES[type], mod = this.mod;
+    let m = this.hpScale(this.wave);
+    if (mod === 'haste') m *= 0.85;
+    if (mod === 'horde') m *= 0.7;
+    const hp = def.hp * m;
+    const e = {
+      type, def, hp, maxHp: hp,
+      armor: (def.armor || 0) * (1 + this.wave * 0.08) + (mod === 'armored' ? 2 + this.wave * 0.1 : 0),
+      speedMul: mod === 'haste' ? 1.3 : 1, regen: mod === 'regen' ? 0.02 : 0,
+      maxShield: hp * ((def.shield || 0) + (mod === 'shielded' ? 0.4 : 0)), shieldT: 0,
+      flying: !!def.flying, slow: 0, slowT: 0, stunT: 0, vuln: 0, vulnT: 0, hitT: 0, prog: 0, ang: 0, alive: true,
       ox: (Math.random() - 0.5) * 14, oy: (Math.random() - 0.5) * 14, // 겹침 방지용 시각 오프셋
-    });
+    };
+    e.shield = e.maxShield;
+    if (from) {
+      Object.assign(e, { x: from.x, y: from.y, c: from.c, r: from.r, tc: from.tc, tr: from.tr, prog: from.prog });
+      e.ox = from.ox + (Math.random() - 0.5) * 16; e.oy = from.oy + (Math.random() - 0.5) * 16;
+    } else {
+      const [c, r] = this.spawns[si];
+      Object.assign(e, { x: cx(c), y: cx(r), c, r, tc: c, tr: r });
+    }
+    this.enemies.push(e);
   }
 
   // ── 메인 업데이트 ───────────────────────────────────────────
@@ -166,25 +225,30 @@ class Game {
     }
     if (this.state === 'wave') {
       this.waveT += dt;
+      for (const k in this.cds) this.cds[k] = Math.max(0, this.cds[k] - dt);
       while (this.queue.length && this.queue[0].t <= this.waveT) {
         const q = this.queue.shift();
         this.spawn(q.type, q.spawn);
       }
     }
     for (const e of this.enemies) this.updateEnemy(e, dt);
+    for (const z of this.zones) this.updateZone(z, dt);
     for (const t of this.towers) this.updateTower(t, dt);
     for (const s of this.shots) this.updateShot(s, dt);
     this.enemies = this.enemies.filter(e => e.alive);
     this.shots = this.shots.filter(s => !s.dead);
+    this.zones = this.zones.filter(z => z.t > 0);
     this.fx.update(dt);
 
     if (this.lives <= 0 && this.state !== 'lost') {
       this.lives = 0; this.state = 'lost';
       this.fx.shake = 14; Sfx.play('lose');
     } else if (this.state === 'wave' && !this.queue.length && !this.enemies.length) {
-      const bonus = 20 + this.wave * 3;
-      this.gold += bonus;
+      const bonus = 20 + this.wave * 3, interest = Math.min(INTEREST_CAP, Math.floor(this.gold * INTEREST));
+      this.gold += bonus + interest;
       this.fx.text(this.coreX, this.coreY - 30, `웨이브 클리어 +${bonus}`, '#80ed99');
+      if (interest) this.fx.text(this.coreX, this.coreY - 14, `이자 +${interest}`, '#ffd166');
+      this.mod = null;
       if (this.wave === TOTAL_WAVES && !this.endless) { this.state = 'won'; Sfx.play('win'); }
       else { this.state = 'build'; this.countdown = 10; }
     }
@@ -192,9 +256,12 @@ class Game {
 
   updateEnemy(e, dt) {
     if (!e.alive) return;
-    e.hitT -= dt; e.slowT -= dt;
-    let step = e.def.speed * (e.slowT > 0 ? 1 - e.slow : 1) * dt;
+    e.hitT -= dt; e.slowT -= dt; e.stunT -= dt; e.vulnT -= dt; e.shieldT -= dt;
+    if (e.regen) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * e.regen * dt);
+    if (e.maxShield && e.shieldT <= 0) e.shield = Math.min(e.maxShield, e.shield + e.maxShield * 0.25 * dt);
+    if (e.stunT > 0) return; // 빙결·시간 정지 중에는 이동도 능력도 멈춘다
 
+    let step = e.def.speed * e.speedMul * (e.slowT > 0 ? 1 - e.slow : 1) * dt;
     if (e.flying) { // 공중: 미로를 무시하고 코어로 직선 비행
       const dx = this.coreX - e.x, dy = this.coreY - e.y, d = Math.hypot(dx, dy);
       e.prog = d; e.ang = Math.atan2(dy, dx);
@@ -234,71 +301,100 @@ class Game {
     Sfx.play('leak');
   }
 
-  damage(e, dmg, pierce, quiet) {
+  // src: 피해를 준 타워 (누적 피해 통계용) / pierce: 방어 무시 / quiet: 피격 깜빡임 생략(지속 피해)
+  damage(e, dmg, src, pierce, quiet) {
     if (!e.alive) return;
-    e.hp -= pierce ? dmg : Math.max(1, dmg - e.armor);
+    let d = pierce ? dmg : Math.max(dmg * 0.15, dmg - e.armor);
+    if (e.vulnT > 0) d *= 1 + e.vuln;
+    if (e.maxShield) e.shieldT = 2;
+    if (e.shield > 0) {
+      const a = Math.min(e.shield, d);
+      e.shield -= a; d -= a;
+      if (src) src.dealt += a;
+    }
+    if (src) src.dealt += Math.min(e.hp, d);
+    e.hp -= d;
     if (!quiet) e.hitT = 0.08;
     if (e.hp > 0) return;
+
     e.alive = false;
     this.kills++;
     this.gold += e.def.reward;
-    this.fx.burst(e.x, e.y, e.def.color, e.type === 'boss' ? 60 : 8 + e.def.r, e.type === 'boss' ? 260 : 120);
+    const boss = e.type === 'boss';
+    this.fx.burst(e.x, e.y, e.def.color, boss ? 60 : 8 + e.def.r, boss ? 260 : 120);
     this.fx.text(e.x, e.y - 12, `+${e.def.reward}`, '#ffd166');
-    if (e.type === 'boss') { this.fx.shake = 12; this.fx.ring(e.x, e.y, 90, e.def.color, 0.6); }
-    Sfx.play(e.type === 'boss' ? 'boom' : 'kill');
+    if (boss) { this.fx.shake = 12; this.fx.ring(e.x, e.y, 90, e.def.color, 0.6); }
+    if (e.def.split) for (let i = 0; i < e.def.split; i++) this.spawn('swarm', 0, e);
+    Sfx.play(boss ? 'boom' : 'kill');
   }
 
-  // 타워의 조준 방식에 따라 사거리 내 최적 목표 선택
-  findTarget(t, range) {
-    let best = null, score = Infinity;
+  // 타워의 조준 방식에 따라 사거리 내 목표를 좋은 순서로 n개 선택
+  findTargets(t, range, n = 1) {
+    const list = [];
     for (const e of this.enemies) {
       if (!e.alive || (t.def.groundOnly && e.flying)) continue;
       const d = Math.hypot(e.x - t.x, e.y - t.y);
       if (d > range) continue;
-      const s = t.mode === 'first' ? e.prog : t.mode === 'strong' ? -e.hp : d;
-      if (s < score) { score = s; best = e; }
+      list.push([t.mode === 'first' ? e.prog : t.mode === 'strong' ? -e.hp : d, e]);
     }
-    return best;
+    if (n === 1) { // 흔한 경우는 정렬 없이 최솟값만
+      let best = null;
+      for (const p of list) if (!best || p[0] < best[0]) best = p;
+      return best ? [best[1]] : [];
+    }
+    return list.sort((a, b) => a[0] - b[0]).slice(0, n).map(p => p[1]);
   }
 
   updateTower(t, dt) {
-    const s = t.def.levels[t.level];
+    const s = this.stats(t);
     t.cd -= dt; t.flash -= dt;
 
     if (t.type === 'frost') { // 오라: 매 프레임 범위 내 전체에 감속 + 지속 피해
-      for (const e of this.enemies) {
-        if (!e.alive || Math.hypot(e.x - t.x, e.y - t.y) > s.range) continue;
+      const inRange = this.enemies.filter(e => e.alive && Math.hypot(e.x - t.x, e.y - t.y) <= s.range);
+      const freeze = s.freeze && t.cd <= 0 && inRange.length > 0;
+      for (const e of inRange) {
         if (e.slowT <= 0 || s.slow >= e.slow) e.slow = s.slow;
         e.slowT = 0.25;
-        this.damage(e, s.dmg * dt, true, true);
+        if (s.vuln) { e.vuln = Math.max(e.vulnT > 0 ? e.vuln : 0, s.vuln); e.vulnT = 0.25; }
+        if (freeze) e.stunT = Math.max(e.stunT, e.type === 'boss' ? s.freeze / 2 : s.freeze);
+        this.damage(e, s.dmg * dt, t, true, true);
+      }
+      if (freeze) {
+        t.cd = s.every; t.flash = 0.15;
+        this.fx.ring(t.x, t.y, s.range, '#ffffff', 0.45);
+        this.fx.burst(t.x, t.y, t.def.color, 20, 160);
+        Sfx.play('freeze');
       }
       return;
     }
 
-    const target = this.findTarget(t, s.range);
+    const targets = this.findTargets(t, s.range, s.multi || 1), target = targets[0];
     if (target) t.ang = Math.atan2(target.y - t.y, target.x - t.x);
     if (t.cd > 0 || !target) return;
-    t.cd = s.rate; t.flash = 0.08;
+    t.cd = s.rate; t.flash = 0.06;
     const mx = t.x + Math.cos(t.ang) * 16, my = t.y + Math.sin(t.ang) * 16;
 
     switch (t.type) {
       case 'pulse':
-        this.shots.push({ kind: 'bullet', x: mx, y: my, target, dmg: s.dmg, color: t.def.color });
+        for (const tg of targets)
+          this.shots.push({ kind: 'bullet', x: mx, y: my, target: tg, dmg: s.dmg, color: t.def.color, src: t });
         Sfx.play('pulse');
         break;
       case 'mortar': {
         const d = Math.hypot(target.x - t.x, target.y - t.y);
-        this.shots.push({ kind: 'shell', sx: mx, sy: my, x: mx, y: my, tx: target.x, ty: target.y, t: 0, dur: 0.3 + d / 420, dmg: s.dmg, splash: s.splash, color: t.def.color });
+        this.shots.push({ kind: 'shell', sx: mx, sy: my, x: mx, y: my, tx: target.x, ty: target.y, t: 0, dur: 0.3 + d / 420,
+          dmg: s.dmg, splash: s.splash, color: t.def.color, src: t, cluster: s.cluster, cdmg: s.cdmg, burn: s.burn, burnT: s.burnT });
         Sfx.play('mortar');
         break;
       }
-      case 'tesla': { // 가장 가까운 미타격 적으로 연쇄, 튈 때마다 피해 25% 감소
+      case 'tesla': { // 가장 가까운 미타격 적으로 연쇄, 튈 때마다 피해 감소
         const hit = new Set(); let cur = target, dmg = s.dmg, px = t.x, py = t.y;
         for (let i = 0; i < s.chain && cur; i++) {
           hit.add(cur);
           this.fx.bolt(px, py, cur.x, cur.y, t.def.color);
-          this.damage(cur, dmg, false);
-          px = cur.x; py = cur.y; dmg *= 0.75;
+          if (s.shred) cur.armor = Math.max(0, cur.armor - s.shred);
+          this.damage(cur, dmg, t, false);
+          px = cur.x; py = cur.y; dmg *= s.decay || 0.75;
           let next = null, nd = 85;
           for (const e of this.enemies) {
             if (!e.alive || hit.has(e)) continue;
@@ -315,17 +411,26 @@ class Game {
         for (const e of this.enemies) {
           if (!e.alive) continue;
           const u = Math.max(0, Math.min(1, ((e.x - t.x) * (ex - t.x) + (e.y - t.y) * (ey - t.y)) / (len * len)));
-          if (Math.hypot(e.x - (t.x + (ex - t.x) * u), e.y - (t.y + (ey - t.y) * u)) <= e.def.r + 7) {
-            this.damage(e, s.dmg, true);
-            this.fx.burst(e.x, e.y, t.def.color, 5, 80);
+          if (Math.hypot(e.x - (t.x + (ex - t.x) * u), e.y - (t.y + (ey - t.y) * u)) > e.def.r + 7) continue;
+          this.damage(e, s.dmg, t, true);
+          this.fx.burst(e.x, e.y, t.def.color, 5, 80);
+          if (s.execute && e.alive && e.type !== 'boss' && e.hp < e.maxHp * s.execute) {
+            this.fx.text(e.x, e.y - 22, '처형', t.def.color);
+            this.damage(e, e.hp + e.shield + 1, t, true);
           }
         }
-        this.fx.beam([[mx, my], [ex, ey]], t.def.color, 5, 0.28);
-        this.fx.shake = Math.max(this.fx.shake, 2.5);
+        this.fx.beam([[mx, my], [ex, ey]], t.def.color, s.rate < 1 ? 3 : 5, s.rate < 1 ? 0.16 : 0.28);
+        this.fx.shake = Math.max(this.fx.shake, s.rate < 1 ? 1 : 2.5);
         Sfx.play('rail');
         break;
       }
     }
+  }
+
+  updateZone(z, dt) { // 네이팜 불길: 지상 적에게 방어 무시 지속 피해
+    z.t -= dt;
+    for (const e of this.enemies)
+      if (e.alive && !e.flying && Math.hypot(e.x - z.x, e.y - z.y) <= z.r + e.def.r) this.damage(e, z.dps * dt, z.src, true, true);
   }
 
   updateShot(s, dt) {
@@ -333,26 +438,34 @@ class Game {
       if (!s.target.alive) { s.dead = true; return; }
       const dx = s.target.x - s.x, dy = s.target.y - s.y, d = Math.hypot(dx, dy), step = 480 * dt;
       if (d <= step + s.target.def.r) {
-        this.damage(s.target, s.dmg, false);
+        this.damage(s.target, s.dmg, s.src, false);
         this.fx.burst(s.x, s.y, s.color, 3, 60);
         s.dead = true;
       } else { s.x += dx / d * step; s.y += dy / d * step; }
-    } else {                   // 포물선 포탄 → 착탄 시 범위 피해 (거리에 따라 감쇠)
-      s.t += dt / s.dur;
-      const k = Math.min(1, s.t);
-      s.x = s.sx + (s.tx - s.sx) * k;
-      s.y = s.sy + (s.ty - s.sy) * k - Math.sin(k * Math.PI) * 34;
-      if (k < 1) return;
-      for (const e of this.enemies) {
-        if (!e.alive || e.flying) continue;
-        const d = Math.hypot(e.x - s.tx, e.y - s.ty);
-        if (d <= s.splash + e.def.r) this.damage(e, s.dmg * (1 - 0.5 * Math.min(1, d / s.splash)), false);
-      }
-      this.fx.ring(s.tx, s.ty, s.splash, s.color, 0.3);
-      this.fx.burst(s.tx, s.ty, s.color, 14, 150);
-      this.fx.shake = Math.max(this.fx.shake, 1.5);
-      Sfx.play('boom');
-      s.dead = true;
+      return;
     }
+    // 포물선 포탄 → 착탄 시 범위 피해 (거리에 따라 감쇠)
+    s.t += dt / s.dur;
+    const k = Math.min(1, s.t);
+    s.x = s.sx + (s.tx - s.sx) * k;
+    s.y = s.sy + (s.ty - s.sy) * k - Math.sin(k * Math.PI) * (s.sub ? 14 : 34);
+    if (k < 1) return;
+    for (const e of this.enemies) {
+      if (!e.alive || e.flying) continue;
+      const d = Math.hypot(e.x - s.tx, e.y - s.ty);
+      if (d <= s.splash + e.def.r) this.damage(e, s.dmg * (1 - 0.5 * Math.min(1, d / s.splash)), s.src, false);
+    }
+    if (s.cluster) for (let i = 0; i < s.cluster; i++) { // 자탄 산개
+      const a = i / s.cluster * TAU_G + Math.random() * 0.6;
+      this.shots.push({ kind: 'shell', sub: true, sx: s.tx, sy: s.ty, x: s.tx, y: s.ty, tx: s.tx + Math.cos(a) * 40, ty: s.ty + Math.sin(a) * 40,
+        t: 0, dur: 0.22, dmg: s.cdmg, splash: 30, color: s.color, src: s.src });
+    }
+    if (s.burn) this.zones.push({ x: s.tx, y: s.ty, r: s.splash, dps: s.burn, t: s.burnT, max: s.burnT, src: s.src });
+    this.fx.ring(s.tx, s.ty, s.splash, s.color, 0.3);
+    this.fx.burst(s.tx, s.ty, s.color, s.sub ? 6 : 14, s.sub ? 90 : 150);
+    this.fx.shake = Math.max(this.fx.shake, s.sub ? 0.5 : 1.5);
+    Sfx.play('boom');
+    s.dead = true;
   }
 }
+const TAU_G = Math.PI * 2;

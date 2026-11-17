@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-//  main.js — 게임 루프, 입력, DOM UI (HUD·상점·메뉴)
+//  main.js — 게임 루프, 입력, DOM UI (HUD·상점·스킬·메뉴)
 // ─────────────────────────────────────────────────────────────
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), ctx = cv.getContext('2d');
@@ -8,7 +8,9 @@ const STEP = 1 / 60;
 
 let game = new Game(MAPS[0]); // 메뉴 뒤 배경으로도 쓰인다
 let running = false, paused = false, ended = false, speed = 1, scale = 1, acc = 0, last = performance.now();
-const ui = { build: null, hover: null, valid: false, selected: null, hoverKey: '' };
+const ui = { build: null, skill: null, hover: null, mouse: null, valid: false, selected: null, hoverKey: '' };
+
+const fmt = n => n >= 10000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n));
 
 // ── 최고 기록 (localStorage) ─────────────────────────────────
 const BEST_KEY = 'neon-bastion.best';
@@ -29,9 +31,21 @@ function fit() {
 }
 window.addEventListener('resize', fit);
 
-// ── 상점 ────────────────────────────────────────────────────
+// ── 상점 (스킬 2 + 타워 5) ───────────────────────────────────
+const tip = Object.assign(document.createElement('div'), { id: 'tip' });
 function buildShop() {
   shop.innerHTML = '';
+  for (const [id, sk] of Object.entries(SKILLS)) {
+    const b = document.createElement('button');
+    b.className = 'card skill'; b.dataset.skill = id;
+    b.style.setProperty('--c', sk.color);
+    b.innerHTML = `<img class="glyph" src="${sk.icon}" alt=""><div><div class="nm">${sk.name}</div><div class="cost cd">준비됨</div></div><kbd>${sk.key.toUpperCase()}</kbd><span class="cdbar"></span>`;
+    b.onclick = () => triggerSkill(id);
+    b.onmouseenter = () => { tip.textContent = `${sk.name} — ${sk.desc} 쿨타임 ${sk.cd}초 (전투 중에만 감소)`; };
+    b.onmouseleave = showDefaultTip;
+    shop.appendChild(b);
+  }
+  shop.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
   for (const [type, def] of Object.entries(TOWERS)) {
     const b = document.createElement('button');
     b.className = 'card'; b.dataset.type = type;
@@ -40,38 +54,58 @@ function buildShop() {
     ic.scale(2, 2);
     drawTower(ic, type, 0, 22, 22, -Math.PI / 4, 0, 0);
     b.onclick = () => setBuild(ui.build === type ? null : type);
-    b.onmouseenter = () => { tip.textContent = `${def.name} — ${def.desc}`; };
+    b.onmouseenter = () => { tip.textContent = `${def.name} — ${def.desc}  3레벨 특화: ${def.branches.map(x => x.name).join(' / ')}`; };
     b.onmouseleave = showDefaultTip;
     shop.appendChild(b);
   }
   shop.appendChild(tip);
   showDefaultTip();
 }
-const tip = Object.assign(document.createElement('div'), { id: 'tip' });
 function showDefaultTip() {
-  tip.textContent = ui.build ? `${TOWERS[ui.build].name} — ${TOWERS[ui.build].desc}  (우클릭·Esc: 취소)`
-    : '타워를 골라 빈 칸에 배치하세요. 타워는 길을 막아 적의 경로를 바꿉니다.';
+  tip.textContent = ui.skill === 'strike' ? '궤도 폭격 — 폭격할 위치를 클릭하세요. (우클릭·Esc: 취소)'
+    : ui.build ? `${TOWERS[ui.build].name} — ${TOWERS[ui.build].desc}  (우클릭·Esc: 취소)`
+    : `타워는 길을 막아 적의 경로를 바꿉니다. 웨이브를 클리어하면 보유 골드의 ${INTEREST * 100}% 이자(최대 ${INTEREST_CAP})가 붙습니다.`;
 }
 
 function setBuild(type) {
-  ui.build = type; ui.selected = null; ui.hoverKey = '';
-  shop.querySelectorAll('.card').forEach(c => c.classList.toggle('on', c.dataset.type === type));
+  ui.build = type; ui.skill = null; ui.selected = null; ui.hoverKey = '';
+  shop.querySelectorAll('.card').forEach(c => c.classList.toggle('on', !!type && c.dataset.type === type));
   showDefaultTip();
 }
 
-// ── 입력 ────────────────────────────────────────────────────
-function cellAt(ev) {
-  const r = cv.getBoundingClientRect();
-  const c = Math.floor((ev.clientX - r.left) / r.width * COLS), row = Math.floor((ev.clientY - r.top) / r.height * ROWS);
-  return inb(c, row) ? [c, row] : null;
+function triggerSkill(id) {
+  if (!running || ended || game.cds[id] > 0) return;
+  Sfx.init();
+  if (id === 'strike') { // 위치 지정이 필요한 스킬은 조준 모드로
+    const on = ui.skill !== 'strike';
+    setBuild(null);
+    ui.skill = on ? 'strike' : null;
+    shop.querySelectorAll('.card').forEach(c => c.classList.toggle('on', on && c.dataset.skill === 'strike'));
+    showDefaultTip();
+  } else game.useSkill(id);
 }
-cv.addEventListener('pointermove', ev => { ui.hover = cellAt(ev); });
-cv.addEventListener('pointerleave', () => { ui.hover = null; });
+
+// ── 입력 ────────────────────────────────────────────────────
+function pointerAt(ev) {
+  const r = cv.getBoundingClientRect();
+  return [(ev.clientX - r.left) / r.width * W, (ev.clientY - r.top) / r.height * H];
+}
+function cellAt(ev) {
+  const [x, y] = pointerAt(ev), c = Math.floor(x / CELL), r = Math.floor(y / CELL);
+  return inb(c, r) ? [c, r] : null;
+}
+cv.addEventListener('pointermove', ev => { ui.hover = cellAt(ev); ui.mouse = pointerAt(ev); });
+cv.addEventListener('pointerleave', () => { ui.hover = null; ui.mouse = null; });
 cv.addEventListener('contextmenu', ev => ev.preventDefault());
 cv.addEventListener('pointerdown', ev => {
   if (!running || ended) return;
   Sfx.init();
   if (ev.button === 2) { setBuild(null); return; }
+  if (ui.skill === 'strike') {
+    const [x, y] = ui.mouse = pointerAt(ev);
+    if (game.useSkill('strike', x, y)) setBuild(null);
+    return;
+  }
   const cell = ui.hover = cellAt(ev);
   if (!cell) return;
   const [c, r] = cell;
@@ -86,9 +120,11 @@ cv.addEventListener('pointerdown', ev => {
 });
 
 panel.addEventListener('click', ev => {
-  const act = ev.target.closest('button')?.dataset.act, t = ui.selected;
-  if (!act || !t) return;
+  const btn = ev.target.closest('button'), t = ui.selected;
+  if (!btn || !t) return;
+  const act = btn.dataset.act;
   if (act === 'up') game.upgrade(t);
+  else if (act === 'br') game.upgrade(t, +btn.dataset.b);
   else if (act === 'sell') { game.sell(t); ui.selected = null; }
   else if (act === 'mode') cycleMode(t);
 });
@@ -101,13 +137,16 @@ window.addEventListener('keydown', ev => {
   if (!running || ended || ev.repeat) return;
   const k = ev.key.toLowerCase(), t = ui.selected;
   const type = Object.keys(TOWERS).find(n => TOWERS[n].key === k);
+  const skill = Object.keys(SKILLS).find(n => SKILLS[n].key === k);
   if (type) setBuild(ui.build === type ? null : type);
-  else if (k === 'escape') { setBuild(null); }
+  else if (skill) triggerSkill(skill);
+  else if (k === 'escape') setBuild(null);
   else if (k === ' ') { ev.preventDefault(); togglePause(); }
   else if (k === 'f') cycleSpeed();
   else if (k === 'n') game.startWave();
   else if (k === 'm') toggleMute();
-  else if (k === 'u' && t) game.upgrade(t);
+  else if (k === 'u' && t && t.level === 0) game.upgrade(t);
+  else if ((k === 'a' || k === 'b') && t && t.level === 1) game.upgrade(t, k === 'a' ? 0 : 1);
   else if (k === 't' && t) cycleMode(t);
   else if (k === 'x' && t) { game.sell(t); ui.selected = null; }
 });
@@ -139,13 +178,22 @@ function syncUI() {
   set('#btnWave', inWave ? '전투 중…' : game.countdown > 0
     ? `지금 호출 +${Math.ceil(game.countdown) * 2}G <kbd>N</kbd>` : '웨이브 시작 <kbd>N</kbd>', 'innerHTML');
 
-  // 다음(또는 현재) 웨이브 구성 미리보기
-  const w = inWave ? game.wave : game.wave + 1;
-  set('#preview', (inWave ? '현재' : '다음') + ' ' + genWave(w).map(g =>
-    `<span class="en"><i class="dot" style="background:${ENEMIES[g.type].color}"></i>${ENEMIES[g.type].name}×${g.count}</span>`).join(''), 'innerHTML');
+  // 다음(또는 현재) 웨이브 구성과 변이 미리보기
+  const wv = genWave(inWave ? game.wave : game.wave + 1), mod = wv.mod && MODS[wv.mod];
+  set('#preview', (inWave ? '현재' : '다음') +
+    (mod ? ` <span class="mod" style="--c:${mod.color}" title="${mod.desc}">${mod.name} · ${mod.desc}</span>` : '') +
+    wv.groups.map(({ type, count }) => {
+      const { name, color, icon } = ENEMIES[type];
+      const marker = enemyIcons[type]?.naturalWidth ? `<img src="${icon}" alt="">` : `<i class="dot" style="background:${color}"></i>`;
+      return `<span class="en">${marker}${name}×${count}</span>`;
+    }).join(''), 'innerHTML');
 
-  for (const c of shop.querySelectorAll('.card'))
-    c.classList.toggle('poor', game.gold < TOWERS[c.dataset.type].levels[0].cost);
+  for (const c of shop.querySelectorAll('.card')) {
+    if (c.dataset.type) { c.classList.toggle('poor', game.gold < TOWERS[c.dataset.type].levels[0].cost); continue; }
+    const id = c.dataset.skill, left = game.cds[id], label = left > 0 ? `${Math.ceil(left)}초` : '준비됨';
+    if (c._label !== label) { c._label = label; c.querySelector('.cd').textContent = label; c.classList.toggle('cooling', left > 0); }
+    c.style.setProperty('--p', left / SKILLS[id].cd);
+  }
 
   // 배치 가능 여부는 커서 칸이나 지형이 바뀔 때만 재계산 (BFS 비용 절약)
   if (ui.build && ui.hover) {
@@ -156,10 +204,11 @@ function syncUI() {
   syncPanel();
 }
 
+let panelHtml = '';
 function syncPanel() {
   const t = ui.selected;
   if (!t || !game.towers.includes(t)) { ui.selected = null; set('#panel', true, 'hidden'); return; }
-  const s = t.def.levels[t.level], n = t.def.levels[t.level + 1], cost = game.upgradeCost(t);
+  const s = game.stats(t), n = t.level === 0 ? t.def.levels[1] : null;
   const row = (label, cur, nxt, unit = '') =>
     `<tr><td>${label}</td><td>${cur}${unit}${nxt != null && nxt !== cur ? ` <span class="up">→ ${nxt}${unit}</span>` : ''}</td></tr>`;
   const rows = [row(t.type === 'frost' ? '초당 피해' : '피해', s.dmg, n?.dmg), row('사거리', s.range, n?.range)];
@@ -167,11 +216,25 @@ function syncPanel() {
   if (s.splash) rows.push(row('폭발 반경', s.splash, n?.splash));
   if (s.slow) rows.push(row('감속', Math.round(s.slow * 100), n && Math.round(n.slow * 100), '%'));
   if (s.chain) rows.push(row('연쇄', s.chain, n?.chain, '회'));
-  const html = `<h3 style="color:${t.def.color}">${t.def.name}<small>Lv.${t.level + 1}</small></h3><table>${rows.join('')}</table>` +
-    (t.type !== 'frost' ? `<div class="row"><button data-act="mode">조준: ${TARGET_MODES[t.mode]} <kbd>T</kbd></button></div>` : '') +
-    `<div class="row"><button data-act="up" class="primary" ${cost == null || game.gold < cost ? 'disabled' : ''}>${cost == null ? '최대 레벨' : `강화 ${cost}G`} <kbd>U</kbd></button>` +
-    `<button data-act="sell" class="danger">판매 +${Math.floor(t.spent * SELL_RATIO)}G <kbd>X</kbd></button></div>`;
-  set('#panel', html, 'innerHTML');
+  rows.push('<tr><td>누적 피해</td><td class="dealt"></td></tr>');
+
+  const title = t.branch != null ? t.def.branches[t.branch].name : t.def.name;
+  let html = `<h3 style="color:${t.def.color}">${title}<small>Lv.${t.level + 1}</small></h3>` +
+    (t.branch != null ? `<p class="spec">${t.def.branches[t.branch].desc}</p>` : '') + `<table>${rows.join('')}</table>`;
+  if (t.type !== 'frost') html += `<div class="row"><button data-act="mode">조준: ${TARGET_MODES[t.mode]} <kbd>T</kbd></button></div>`;
+  if (t.level === 1) { // 특화 분기 선택
+    html += '<div class="branches">' + t.def.branches.map((b, i) =>
+      `<button data-act="br" data-b="${i}" ${game.gold < b.cost ? 'disabled' : ''}>
+        <span class="bt"><b>${b.name}</b><span class="c">${b.cost}G <kbd>${'AB'[i]}</kbd></span></span><small>${b.desc}</small></button>`).join('') + '</div>';
+  } else if (t.level === 0) {
+    const cost = game.upgradeCost(t);
+    html += `<div class="row"><button data-act="up" class="primary" ${game.gold < cost ? 'disabled' : ''}>강화 ${cost}G <kbd>U</kbd></button></div>`;
+  }
+  html += `<div class="row"><button data-act="sell" class="danger">판매 +${Math.floor(t.spent * SELL_RATIO)}G <kbd>X</kbd></button></div>`;
+
+  if (html !== panelHtml) { panelHtml = html; panel.innerHTML = html; }
+  const d = panel.querySelector('.dealt'), v = fmt(t.dealt);
+  if (d.textContent !== v) d.textContent = v; // 매 프레임 바뀌는 값은 패널을 다시 만들지 않고 이 칸만 갱신
   set('#panel', false, 'hidden');
   // 타워를 가리지 않도록 반대편에 배치
   panel.style.left = t.x > W / 2 ? '10px' : ''; panel.style.right = t.x > W / 2 ? '' : '10px';
@@ -192,8 +255,8 @@ function showMenu() {
         <div class="b">${best[m.id] ? `최고 기록: 웨이브 ${best[m.id]}` : '기록 없음'}</div>
       </button>`).join('')}</div>
     <div class="help">
-      <kbd>1</kbd>–<kbd>5</kbd> 타워 선택 · 클릭으로 배치 · <kbd>U</kbd> 강화 · <kbd>X</kbd> 판매 · <kbd>T</kbd> 조준 변경<br>
-      <kbd>N</kbd> 웨이브 호출 · <kbd>F</kbd> 배속 · <kbd>Space</kbd> 일시정지 · <kbd>M</kbd> 소리
+      <kbd>1</kbd>–<kbd>5</kbd> 타워 선택 · 클릭으로 배치 · <kbd>U</kbd> 강화 · <kbd>A</kbd>/<kbd>B</kbd> 3레벨 특화 · <kbd>X</kbd> 판매 · <kbd>T</kbd> 조준 변경<br>
+      <kbd>Q</kbd> 궤도 폭격 · <kbd>E</kbd> 시간 정지 · <kbd>N</kbd> 웨이브 호출 · <kbd>F</kbd> 배속 · <kbd>Space</kbd> 일시정지 · <kbd>M</kbd> 소리
     </div></div>`;
   overlay.querySelectorAll('.map').forEach(b => {
     const m = MAPS[b.dataset.map];
@@ -228,6 +291,8 @@ function startGame(map) {
 function showEnd() {
   const won = game.state === 'won';
   saveBest(game.map.id, clearedWaves());
+  const mvp = [...game.towers].sort((a, b) => b.dealt - a.dealt)[0];
+  const mvpName = mvp && (mvp.branch != null ? mvp.def.branches[mvp.branch].name : mvp.def.name);
   overlay.innerHTML = `<div class="modal">
     <h2 class="${won ? 'win' : 'lose'}">${won ? '방어 성공' : '코어 파괴됨'}</h2>
     <p>${game.map.name} · ${won ? `${TOTAL_WAVES}개 웨이브를 모두 막아냈습니다` : `웨이브 ${game.wave}에서 무너졌습니다`}</p>
@@ -235,6 +300,7 @@ function showEnd() {
       <div><b>${clearedWaves()}</b><span>클리어한 웨이브</span></div>
       <div><b>${game.kills}</b><span>처치</span></div>
       <div><b>${Math.max(0, game.lives)}</b><span>남은 내구도</span></div>
+      ${mvp ? `<div><b style="color:${mvp.def.color}">${mvpName}</b><span>MVP · 피해 ${fmt(mvp.dealt)}</span></div>` : ''}
     </div>
     <div class="actions">
       ${won ? '<button class="primary" data-act="endless">무한 모드로 계속</button>' : ''}
@@ -242,7 +308,7 @@ function showEnd() {
       <button data-act="menu">맵 선택</button>
     </div></div>`;
   overlay.querySelector('.actions').onclick = ev => {
-    const act = ev.target.dataset.act;
+    const act = ev.target.closest('button')?.dataset.act;
     if (act === 'retry') startGame(game.map);
     else if (act === 'menu') showMenu();
     else if (act === 'endless') {

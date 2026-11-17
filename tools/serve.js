@@ -1,7 +1,7 @@
 // 개발용 정적 서버 (의존성 없음):  node tools/serve.js  →  http://localhost:5173
 const http = require('http'), fs = require('fs'), path = require('path');
 const root = path.join(__dirname, '..');
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png' };
 http.createServer((req, res) => {
   const rel = decodeURIComponent(req.url.split('?')[0]);
   const file = path.join(root, rel === '/' ? 'index.html' : rel);

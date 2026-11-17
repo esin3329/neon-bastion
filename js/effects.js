@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 //  effects.js — 파티클·번개·충격파 등 시각 효과와 합성 사운드
-//  외부 에셋 0개: 모든 그래픽은 Canvas, 모든 소리는 WebAudio로 실시간 생성
+//  효과음은 WebAudio로 실시간 생성한다.
 // ─────────────────────────────────────────────────────────────
 class Effects {
   constructor() { this.parts = []; this.texts = []; this.beams = []; this.rings = []; this.shake = 0; }
@@ -88,6 +88,7 @@ const Sfx = {
       case 'build':   this.tone(420, 0.08, 'triangle', 0.06, 200); break;
       case 'upgrade': this.tone(520, 0.09, 'triangle', 0.06); this.tone(780, 0.14, 'triangle', 0.06, 0, 0.09); break;
       case 'sell':    this.tone(620, 0.1, 'triangle', 0.05, -300); break;
+      case 'freeze':  this.tone(1800, 0.35, 'sine', 0.05, -1200); this.tone(2400, 0.25, 'triangle', 0.03, -1600, 0.05); break;
       case 'leak':    this.tone(140, 0.3, 'sawtooth', 0.08, -80); break;
       case 'wave':    this.tone(330, 0.12, 'square', 0.04); this.tone(495, 0.2, 'square', 0.04, 0, 0.12); break;
       case 'boss':    this.tone(110, 0.5, 'sawtooth', 0.08, -50); this.tone(82, 0.7, 'sawtooth', 0.08, -30, 0.25); break;

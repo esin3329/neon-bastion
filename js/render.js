@@ -2,6 +2,13 @@
 //  render.js — Canvas 2D 렌더러. 게임 상태를 읽기만 하고 수정하지 않는다.
 // ─────────────────────────────────────────────────────────────
 const TAU = Math.PI * 2;
+const enemyIcons = {};
+for (const [type, { icon }] of Object.entries(ENEMIES)) {
+  if (!icon) continue;
+  const image = new Image();
+  image.src = icon;
+  enemyIcons[type] = image;
+}
 
 function poly(ctx, x, y, r, n, rot = 0) {
   ctx.beginPath();
@@ -21,11 +28,12 @@ function rrect(ctx, x, y, w, h, r) {
 }
 
 // 타워 한 기 그리기 — 상점 아이콘에서도 같은 함수를 재사용
-function drawTower(ctx, type, level, x, y, ang, time, flash) {
+// branch: 3레벨 특화 번호 (없으면 null) — 금색 테두리와 일부 전용 외형
+function drawTower(ctx, type, level, x, y, ang, time, flash, branch = null) {
   const col = TOWERS[type].color;
   rrect(ctx, x - 16, y - 16, 32, 32, 7);
   ctx.fillStyle = '#131a2c'; ctx.fill();
-  ctx.strokeStyle = col + '99'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.strokeStyle = branch != null ? '#ffd166' : col + '99'; ctx.lineWidth = branch != null ? 2 : 1.5; ctx.stroke();
 
   ctx.save();
   ctx.translate(x, y);
@@ -35,7 +43,9 @@ function drawTower(ctx, type, level, x, y, ang, time, flash) {
   switch (type) {
     case 'pulse':
       ctx.rotate(ang);
-      ctx.fillRect(0, -3, 15, 6);
+      if (branch === 0) { ctx.fillRect(0, -5, 15, 2.5); ctx.fillRect(0, -1.25, 17, 2.5); ctx.fillRect(0, 2.5, 15, 2.5); }      // 개틀링: 3연장
+      else if (branch === 1) { for (const a of [-0.45, 0, 0.45]) { ctx.save(); ctx.rotate(a); ctx.fillRect(0, -2, 14, 4); ctx.restore(); } } // 멀티샷: 부채꼴
+      else ctx.fillRect(0, -3, 15, 6);
       ctx.beginPath(); ctx.arc(0, 0, 7.5, 0, TAU); ctx.fill();
       break;
     case 'mortar':
@@ -70,7 +80,7 @@ function drawTower(ctx, type, level, x, y, ang, time, flash) {
   }
   ctx.restore();
 
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = branch != null ? '#ffd166' : '#ffffff';
   for (let i = 0; i <= level; i++) ctx.fillRect(x - 8 + i * 6, y + 11, 4, 2); // 레벨 표시
 }
 
@@ -83,28 +93,56 @@ function drawEnemy(ctx, e, time) {
   ctx.fillStyle = d.color + '33'; // 저렴한 글로우 (shadowBlur 대신 반투명 원)
   ctx.beginPath(); ctx.arc(x, y, r + 4, 0, TAU); ctx.fill();
 
-  ctx.fillStyle = e.hitT > 0 ? '#ffffff' : d.color;
-  switch (d.shape) {
-    case 'tri':    poly(ctx, x, y, r + 2, 3, e.ang); ctx.fill(); break;
-    case 'square': ctx.fillRect(x - r, y - r, r * 2, r * 2);
-                   ctx.strokeStyle = '#ffffff88'; ctx.lineWidth = 2; ctx.strokeRect(x - r + 3, y - r + 3, r * 2 - 6, r * 2 - 6); break;
-    case 'plus':   ctx.fillRect(x - r, y - 3, r * 2, 6); ctx.fillRect(x - 3, y - r, 6, r * 2); break;
-    case 'wing':   poly(ctx, x, y, r + 3, 3, e.ang); ctx.fill();
-                   poly(ctx, x, y, r, 4, e.ang + Math.PI / 4 + Math.sin(time * 18) * 0.25); ctx.fill(); break;
-    case 'hex':    poly(ctx, x, y, r, 6, time); ctx.fill();
-                   ctx.fillStyle = '#0a0e1a'; poly(ctx, x, y, r * 0.55, 6, -time * 1.5); ctx.fill();
-                   ctx.fillStyle = d.color; ctx.beginPath(); ctx.arc(x, y, 4, 0, TAU); ctx.fill(); break;
-    default:       ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  const icon = enemyIcons[e.type];
+  if (icon?.naturalWidth) {
+    const size = r * 2.4;
+    ctx.save();
+    ctx.translate(x, y);
+    if (e.flying) ctx.rotate(e.ang + Math.PI / 2); // 스프라이트의 기본 방향은 위쪽
+    if (e.hitT > 0) ctx.filter = 'brightness(0) invert(1)';
+    ctx.drawImage(icon, -size / 2, -size / 2, size, size);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = e.hitT > 0 ? '#ffffff' : d.color;
+    switch (d.shape) {
+      case 'tri':    poly(ctx, x, y, r + 2, 3, e.ang); ctx.fill(); break;
+      case 'square': ctx.fillRect(x - r, y - r, r * 2, r * 2);
+                     ctx.strokeStyle = '#ffffff88'; ctx.lineWidth = 2; ctx.strokeRect(x - r + 3, y - r + 3, r * 2 - 6, r * 2 - 6); break;
+      case 'plus':   ctx.fillRect(x - r, y - 3, r * 2, 6); ctx.fillRect(x - 3, y - r, 6, r * 2); break;
+      case 'wing':   poly(ctx, x, y, r + 3, 3, e.ang); ctx.fill();
+                     poly(ctx, x, y, r, 4, e.ang + Math.PI / 4 + Math.sin(time * 18) * 0.25); ctx.fill(); break;
+      case 'hex':    poly(ctx, x, y, r, 6, time); ctx.fill();
+                     ctx.fillStyle = '#0a0e1a'; poly(ctx, x, y, r * 0.55, 6, -time * 1.5); ctx.fill();
+                     ctx.fillStyle = d.color; ctx.beginPath(); ctx.arc(x, y, 4, 0, TAU); ctx.fill(); break;
+      case 'diamond': poly(ctx, x, y, r + 2, 4, 0); ctx.fill(); break;
+      case 'blob':   for (let i = 0; i < 3; i++) { // 분열 직전처럼 꿈틀대는 세 덩어리
+                       const a = i / 3 * TAU + time * 2;
+                       ctx.beginPath(); ctx.arc(x + Math.cos(a) * r * 0.4, y + Math.sin(a) * r * 0.4, r * 0.65, 0, TAU); ctx.fill();
+                     } break;
+      default:       ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+    }
   }
-  if (e.slowT > 0) { // 감속 상태 표시
-    ctx.strokeStyle = '#90e0ef'; ctx.lineWidth = 1.5;
+  if (e.shield > 1) { // 실드: 남은 양만큼 밝은 고리
+    ctx.strokeStyle = `rgba(72,202,228,${0.35 + 0.6 * e.shield / e.maxShield})`; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(x, y, r + 5, 0, TAU); ctx.stroke();
+  }
+  if (e.stunT > 0) { // 빙결·정지: 얼음 육각형
+    ctx.fillStyle = 'rgba(200,240,255,0.35)'; ctx.strokeStyle = '#e0fbff'; ctx.lineWidth = 1.5;
+    poly(ctx, x, y, r + 4, 6, 0); ctx.fill(); ctx.stroke();
+  } else if (e.slowT > 0) { // 감속
+    ctx.strokeStyle = e.vulnT > 0 ? '#c77dff' : '#90e0ef'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(x, y, r + 3, 0, TAU); ctx.stroke();
   }
+  const w = Math.max(16, r * 2.2);
   if (e.hp < e.maxHp) {
-    const w = Math.max(16, r * 2.2), k = Math.max(0, e.hp / e.maxHp);
+    const k = Math.max(0, e.hp / e.maxHp);
     ctx.fillStyle = '#00000099'; ctx.fillRect(x - w / 2, y - r - 8, w, 3);
     ctx.fillStyle = k > 0.5 ? '#80ed99' : k > 0.25 ? '#ffd166' : '#ff5d73';
     ctx.fillRect(x - w / 2, y - r - 8, w * k, 3);
+  }
+  if (e.maxShield && e.shield < e.maxShield) {
+    ctx.fillStyle = '#00000099'; ctx.fillRect(x - w / 2, y - r - 12, w, 2);
+    ctx.fillStyle = '#48cae4'; ctx.fillRect(x - w / 2, y - r - 12, w * e.shield / e.maxShield, 2);
   }
 }
 
@@ -154,15 +192,23 @@ function render(ctx, game, ui, scale) {
   // 프로스트 오라
   for (const tw of game.towers) {
     if (tw.type !== 'frost') continue;
-    const range = tw.def.levels[tw.level].range, k = (t * 0.6 + tw.c * 0.13) % 1;
+    const range = game.stats(tw).range, k = (t * 0.6 + tw.c * 0.13) % 1;
     ctx.fillStyle = 'rgba(144,224,239,0.05)';
     ctx.beginPath(); ctx.arc(tw.x, tw.y, range, 0, TAU); ctx.fill();
     ctx.strokeStyle = `rgba(144,224,239,${0.35 * (1 - k)})`; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(tw.x, tw.y, range * k, 0, TAU); ctx.stroke();
   }
 
+  // 네이팜 불길
+  for (const z of game.zones) {
+    const k = Math.min(1, z.t / 0.4), fl = 0.85 + Math.sin(t * 30 + z.x) * 0.15;
+    const g = ctx.createRadialGradient(z.x, z.y, 0, z.x, z.y, z.r);
+    g.addColorStop(0, `rgba(255,120,30,${0.45 * k * fl})`); g.addColorStop(1, 'rgba(255,60,20,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, TAU); ctx.fill();
+  }
+
   for (const e of game.enemies) if (!e.flying) drawEnemy(ctx, e, t);
-  for (const tw of game.towers) drawTower(ctx, tw.type, tw.level, tw.x, tw.y, tw.ang, t, tw.flash);
+  for (const tw of game.towers) drawTower(ctx, tw.type, tw.level, tw.x, tw.y, tw.ang, t, tw.flash, tw.branch);
   for (const e of game.enemies) if (e.flying) drawEnemy(ctx, e, t);
 
   // 발사체
@@ -205,7 +251,15 @@ function render(ctx, game, ui, scale) {
 
   // 선택한 타워의 사거리
   const sel = ui.selected;
-  if (sel) rangeCircle(ctx, sel.x, sel.y, sel.def.levels[sel.level].range, sel.def.color);
+  if (sel) rangeCircle(ctx, sel.x, sel.y, game.stats(sel).range, sel.def.color);
+
+  // 궤도 폭격 조준
+  if (ui.skill === 'strike' && ui.mouse) {
+    const sk = SKILLS.strike, [mx, my] = ui.mouse;
+    rangeCircle(ctx, mx, my, sk.radius, sk.color);
+    ctx.strokeStyle = sk.color; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(mx - 10, my); ctx.lineTo(mx + 10, my); ctx.moveTo(mx, my - 10); ctx.lineTo(mx, my + 10); ctx.stroke();
+  }
 
   // 건설 미리보기
   if (ui.build && ui.hover) {
