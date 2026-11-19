@@ -267,16 +267,7 @@ function showMenu() {
 }
 
 function drawThumb(c, m) {
-  const s = 20;
-  c.fillStyle = '#0a0e1a'; c.fillRect(0, 0, 480, 280);
-  c.fillStyle = '#263150';
-  for (const [x, y, w, h] of m.rocks) c.fillRect(x * s + 1, y * s + 1, w * s - 2, h * s - 2);
-  const g = new Game(m); // 실제 경로탐색 결과를 썸네일에 그대로 표시
-  c.strokeStyle = '#ff5d7399'; c.lineWidth = 2.5; c.setLineDash([5, 5]);
-  for (const p of g.paths) { c.beginPath(); p.forEach(([x, y], i) => c[i ? 'lineTo' : 'moveTo'](x * s + 10, y * s + 10)); c.stroke(); }
-  c.fillStyle = '#ff5d73';
-  for (const [x, y] of m.spawns) { c.beginPath(); c.arc(x * s + 10, y * s + 10, 6, 0, TAU); c.fill(); }
-  c.fillStyle = '#4cc9f0'; poly(c, m.core[0] * s + 10, m.core[1] * s + 10, 9, 6); c.fill();
+  render(c, new Game(m), {}, 0.5);
 }
 
 function startGame(map) {
@@ -340,4 +331,8 @@ function frame(now) {
 buildShop();
 fit();
 showMenu();
+Promise.allSettled(Object.values(sceneSprites).map(image => image.decode())).then(() => {
+  overlay.querySelectorAll('.map').forEach(button =>
+    drawThumb(button.querySelector('canvas').getContext('2d'), MAPS[button.dataset.map]));
+});
 requestAnimationFrame(frame);

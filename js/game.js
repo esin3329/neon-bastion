@@ -155,8 +155,11 @@ class Game {
       this.fx.shake = 12;
       Sfx.play('boom'); Sfx.play('rail');
     } else if (id === 'stasis') {
-      for (const e of this.enemies) e.stunT = Math.max(e.stunT, e.type === 'boss' ? sk.dur / 2 : sk.dur);
-      this.fx.ring(this.coreX, this.coreY, Math.hypot(W, H), sk.color, 0.8);
+      for (const e of this.enemies) {
+        e.stasisT = Math.max(e.stasisT, e.type === 'boss' ? sk.dur / 2 : sk.dur);
+        e.stunT = Math.max(e.stunT, e.stasisT);
+      }
+      this.fx.ring(this.coreX, this.coreY, Math.hypot(W, H), sk.color, 0.8, 'stasis');
       this.fx.text(this.coreX, this.coreY - 30, '시간 정지', sk.color);
       Sfx.play('freeze');
     }
@@ -202,7 +205,7 @@ class Game {
       armor: (def.armor || 0) * (1 + this.wave * 0.08) + (mod === 'armored' ? 2 + this.wave * 0.1 : 0),
       speedMul: mod === 'haste' ? 1.3 : 1, regen: mod === 'regen' ? 0.02 : 0,
       maxShield: hp * ((def.shield || 0) + (mod === 'shielded' ? 0.4 : 0)), shieldT: 0,
-      flying: !!def.flying, slow: 0, slowT: 0, stunT: 0, vuln: 0, vulnT: 0, hitT: 0, prog: 0, ang: 0, alive: true,
+      flying: !!def.flying, slow: 0, slowT: 0, stunT: 0, stasisT: 0, healFxT: 0, vuln: 0, vulnT: 0, hitT: 0, prog: 0, ang: 0, alive: true,
       ox: (Math.random() - 0.5) * 14, oy: (Math.random() - 0.5) * 14, // 겹침 방지용 시각 오프셋
     };
     e.shield = e.maxShield;
@@ -256,7 +259,7 @@ class Game {
 
   updateEnemy(e, dt) {
     if (!e.alive) return;
-    e.hitT -= dt; e.slowT -= dt; e.stunT -= dt; e.vulnT -= dt; e.shieldT -= dt;
+    e.hitT -= dt; e.slowT -= dt; e.stunT -= dt; e.stasisT -= dt; e.healFxT -= dt; e.vulnT -= dt; e.shieldT -= dt;
     if (e.regen) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * e.regen * dt);
     if (e.maxShield && e.shieldT <= 0) e.shield = Math.min(e.maxShield, e.shield + e.maxShield * 0.25 * dt);
     if (e.stunT > 0) return; // 빙결·시간 정지 중에는 이동도 능력도 멈춘다
@@ -286,9 +289,17 @@ class Game {
 
     if (e.def.heal) { // 힐러: 주변 아군 회복
       const amt = e.def.heal * hpMult(this.wave) * dt;
-      for (const o of this.enemies)
-        if (o !== e && o.alive && o.hp < o.maxHp && Math.hypot(o.x - e.x, o.y - e.y) < 70)
+      let healed = false;
+      for (const o of this.enemies) {
+        if (o !== e && o.alive && o.hp < o.maxHp && Math.hypot(o.x - e.x, o.y - e.y) < 70) {
           o.hp = Math.min(o.maxHp, o.hp + amt);
+          healed = true;
+        }
+      }
+      if (healed && amt > 0 && e.healFxT <= 0) {
+        this.fx.ring(e.x + e.ox, e.y + e.oy, 70, e.def.color, 0.8, 'heal');
+        e.healFxT = 0.9;
+      }
     }
   }
 

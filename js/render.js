@@ -2,6 +2,12 @@
 //  render.js — Canvas 2D 렌더러. 게임 상태를 읽기만 하고 수정하지 않는다.
 // ─────────────────────────────────────────────────────────────
 const TAU = Math.PI * 2;
+const sceneSprites = {};
+for (const [name, src] of Object.entries(SCENE_SPRITES)) {
+  const image = new Image();
+  image.src = src;
+  sceneSprites[name] = image;
+}
 const enemyIcons = {};
 for (const [type, { icon }] of Object.entries(ENEMIES)) {
   if (!icon) continue;
@@ -143,7 +149,13 @@ function drawEnemy(ctx, e, time) {
     ctx.strokeStyle = `rgba(72,202,228,${0.35 + 0.6 * e.shield / e.maxShield})`; ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.arc(x, y, r + 5, 0, TAU); ctx.stroke();
   }
-  if (e.stunT > 0) { // 빙결·정지: 얼음 육각형
+  if (e.stasisT > 0 && sceneSprites.stasis.naturalWidth) {
+    const size = (r + 7) * 2.5;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, e.stasisT / 0.3);
+    ctx.drawImage(sceneSprites.stasis, x - size / 2, y - size / 2, size, size);
+    ctx.restore();
+  } else if (e.stunT > 0) { // 빙결·이미지 로딩 중: 얼음 육각형
     ctx.fillStyle = 'rgba(200,240,255,0.35)'; ctx.strokeStyle = '#e0fbff'; ctx.lineWidth = 1.5;
     poly(ctx, x, y, r + 4, 6, 0); ctx.fill(); ctx.stroke();
   } else if (e.slowT > 0) { // 감속
@@ -178,9 +190,13 @@ function render(ctx, game, ui, scale) {
   // 바위
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     if (game.grid[idx(c, r)] !== 1) continue;
-    rrect(ctx, c * CELL + 2, r * CELL + 2, CELL - 4, CELL - 4, 6);
-    ctx.fillStyle = '#1b2338'; ctx.fill();
-    ctx.fillStyle = '#263150'; ctx.fillRect(c * CELL + 6, r * CELL + 5, CELL - 12, 3);
+    if (sceneSprites.blocked.naturalWidth) {
+      ctx.drawImage(sceneSprites.blocked, c * CELL, r * CELL, CELL, CELL);
+    } else {
+      rrect(ctx, c * CELL + 2, r * CELL + 2, CELL - 4, CELL - 4, 6);
+      ctx.fillStyle = '#1b2338'; ctx.fill();
+      ctx.fillStyle = '#263150'; ctx.fillRect(c * CELL + 6, r * CELL + 5, CELL - 12, 3);
+    }
   }
 
   // 예상 진격로 (흐르는 점선)
@@ -195,15 +211,25 @@ function render(ctx, game, ui, scale) {
 
   // 입구와 코어
   for (const [c, r] of game.spawns) {
-    ctx.strokeStyle = '#ff5d73'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(cx(c), cx(r), 11 + Math.sin(t * 4) * 2, 0, TAU); ctx.stroke();
-    ctx.fillStyle = '#ff5d7355'; ctx.beginPath(); ctx.arc(cx(c), cx(r), 6, 0, TAU); ctx.fill();
+    if (sceneSprites.spawn.naturalWidth) {
+      const size = 34 + Math.sin(t * 4) * 2;
+      ctx.drawImage(sceneSprites.spawn, cx(c) - size / 2, cx(r) - size / 2, size, size);
+    } else {
+      ctx.strokeStyle = '#ff5d73'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx(c), cx(r), 11 + Math.sin(t * 4) * 2, 0, TAU); ctx.stroke();
+      ctx.fillStyle = '#ff5d7355'; ctx.beginPath(); ctx.arc(cx(c), cx(r), 6, 0, TAU); ctx.fill();
+    }
   }
   ctx.save();
   ctx.shadowColor = '#4cc9f0'; ctx.shadowBlur = 22;
-  ctx.fillStyle = '#4cc9f0'; poly(ctx, game.coreX, game.coreY, 15 + Math.sin(t * 3) * 1.5, 6, t * 0.5); ctx.fill();
-  ctx.fillStyle = '#0a0e1a'; poly(ctx, game.coreX, game.coreY, 8, 6, -t * 0.8); ctx.fill();
-  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(game.coreX, game.coreY, 3, 0, TAU); ctx.fill();
+  if (sceneSprites.core.naturalWidth) {
+    const size = 40 + Math.sin(t * 3) * 2;
+    ctx.drawImage(sceneSprites.core, game.coreX - size / 2, game.coreY - size / 2, size, size);
+  } else {
+    ctx.fillStyle = '#4cc9f0'; poly(ctx, game.coreX, game.coreY, 15 + Math.sin(t * 3) * 1.5, 6, t * 0.5); ctx.fill();
+    ctx.fillStyle = '#0a0e1a'; poly(ctx, game.coreX, game.coreY, 8, 6, -t * 0.8); ctx.fill();
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(game.coreX, game.coreY, 3, 0, TAU); ctx.fill();
+  }
   ctx.restore();
 
   // 프로스트 오라
@@ -249,8 +275,15 @@ function render(ctx, game, ui, scale) {
   }
   for (const r of fx.rings) {
     const k = r.life / r.max;
-    ctx.globalAlpha = k; ctx.strokeStyle = r.color; ctx.lineWidth = 3 * k + 0.5;
-    ctx.beginPath(); ctx.arc(r.x, r.y, r.r * (1 - k * 0.7), 0, TAU); ctx.stroke();
+    const image = sceneSprites[r.sprite];
+    if (image?.naturalWidth) {
+      const size = r.r * (1 - k * 0.7) * 2.5;
+      ctx.globalAlpha = k * 0.65;
+      ctx.drawImage(image, r.x - size / 2, r.y - size / 2, size, size);
+    } else {
+      ctx.globalAlpha = k; ctx.strokeStyle = r.color; ctx.lineWidth = 3 * k + 0.5;
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r * (1 - k * 0.7), 0, TAU); ctx.stroke();
+    }
   }
   for (const p of fx.parts) {
     ctx.globalAlpha = p.life / p.max; ctx.fillStyle = p.color;

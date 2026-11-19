@@ -7,6 +7,13 @@ const W = COLS * CELL, H = ROWS * CELL;
 const TOTAL_WAVES = 30;
 const START_GOLD = 220, START_LIVES = 20, SELL_RATIO = 0.7;
 const INTEREST = 0.05, INTEREST_CAP = 40; // 웨이브 클리어 시 보유 골드의 5% 이자 (최대 50)
+const SCENE_SPRITES = {
+  core: 'assets/battlefield/core.png',
+  spawn: 'assets/battlefield/enemy-spawn.png',
+  blocked: 'assets/battlefield/blocked-tile.png',
+  heal: 'assets/effects/healer-pulse.png',
+  stasis: 'assets/effects/time-stasis.png',
+};
 
 // levels[0]: 건설, levels[1]: 1차 강화, branches: 3레벨에서 둘 중 하나를 고르는 특화
 // sprite.pivot은 이미지 안의 회전축(0~1), muzzle은 회전축부터 포구까지의 거리(px)

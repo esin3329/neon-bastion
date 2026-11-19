@@ -15,7 +15,7 @@ class Effects {
   }
   text(x, y, str, color) { this.texts.push({ x, y, str, color, life: 0.9, max: 0.9 }); }
   beam(pts, color, width = 2, life = 0.15) { this.beams.push({ pts, color, width, life, max: life }); }
-  ring(x, y, r, color, life = 0.35) { this.rings.push({ x, y, r, color, life, max: life }); }
+  ring(x, y, r, color, life = 0.35, sprite = null) { this.rings.push({ x, y, r, color, life, max: life, sprite }); }
 
   // 두 점 사이를 지그재그로 잇는 번개
   bolt(x1, y1, x2, y2, color) {
