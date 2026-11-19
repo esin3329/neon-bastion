@@ -9,6 +9,13 @@ for (const [type, { icon }] of Object.entries(ENEMIES)) {
   image.src = icon;
   enemyIcons[type] = image;
 }
+const towerSprites = {};
+for (const { sprite } of Object.values(TOWERS).flatMap(tower => tower.branches)) {
+  if (!sprite) continue;
+  const image = new Image();
+  image.src = sprite.src;
+  towerSprites[sprite.src] = image;
+}
 
 function poly(ctx, x, y, r, n, rot = 0) {
   ctx.beginPath();
@@ -28,60 +35,70 @@ function rrect(ctx, x, y, w, h, r) {
 }
 
 // 타워 한 기 그리기 — 상점 아이콘에서도 같은 함수를 재사용
-// branch: 3레벨 특화 번호 (없으면 null) — 금색 테두리와 일부 전용 외형
+// branch: 3레벨 특화 번호 (없으면 null)
 function drawTower(ctx, type, level, x, y, ang, time, flash, branch = null) {
   const col = TOWERS[type].color;
-  rrect(ctx, x - 16, y - 16, 32, 32, 7);
-  ctx.fillStyle = '#131a2c'; ctx.fill();
-  ctx.strokeStyle = branch != null ? '#ffd166' : col + '99'; ctx.lineWidth = branch != null ? 2 : 1.5; ctx.stroke();
+  const sprite = TOWERS[type].branches[branch]?.sprite, image = towerSprites[sprite?.src];
+  if (image?.naturalWidth) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(type === 'frost' ? time * 0.8 : type === 'tesla' ? 0 : ang);
+    if (flash > 0) ctx.filter = 'brightness(1.8)';
+    ctx.drawImage(image, -sprite.pivot[0] * CELL, -sprite.pivot[1] * CELL, CELL, CELL);
+    ctx.restore();
+  } else {
+    rrect(ctx, x - 16, y - 16, 32, 32, 7);
+    ctx.fillStyle = '#131a2c'; ctx.fill();
+    ctx.strokeStyle = branch != null ? '#ffd166' : col + '99'; ctx.lineWidth = branch != null ? 2 : 1.5; ctx.stroke();
 
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = flash > 0 ? '#ffffff' : col;
-  ctx.strokeStyle = col;
-  ctx.shadowColor = col; ctx.shadowBlur = 8;
-  switch (type) {
-    case 'pulse':
-      ctx.rotate(ang);
-      if (branch === 0) { ctx.fillRect(0, -5, 15, 2.5); ctx.fillRect(0, -1.25, 17, 2.5); ctx.fillRect(0, 2.5, 15, 2.5); }      // 개틀링: 3연장
-      else if (branch === 1) { for (const a of [-0.45, 0, 0.45]) { ctx.save(); ctx.rotate(a); ctx.fillRect(0, -2, 14, 4); ctx.restore(); } } // 멀티샷: 부채꼴
-      else ctx.fillRect(0, -3, 15, 6);
-      ctx.beginPath(); ctx.arc(0, 0, 7.5, 0, TAU); ctx.fill();
-      break;
-    case 'mortar':
-      ctx.rotate(ang);
-      ctx.fillRect(0, -5.5, 13, 11);
-      poly(ctx, 0, 0, 10, 8, Math.PI / 8); ctx.fill();
-      ctx.fillStyle = '#131a2c'; ctx.beginPath(); ctx.arc(0, 0, 4, 0, TAU); ctx.fill();
-      break;
-    case 'frost':
-      ctx.rotate(time * 0.8);
-      ctx.lineWidth = 2.5; ctx.lineCap = 'round';
-      for (let i = 0; i < 3; i++) {
-        const a = i / 3 * Math.PI;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * 11, Math.sin(a) * 11); ctx.lineTo(-Math.cos(a) * 11, -Math.sin(a) * 11);
-        ctx.stroke();
-      }
-      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, TAU); ctx.fill();
-      break;
-    case 'tesla':
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(0, 0, 10, 0, TAU); ctx.stroke();
-      ctx.beginPath(); ctx.arc(0, 0, 6, 0, TAU); ctx.stroke();
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.arc(0, 0, 2.5 + Math.sin(time * 14) * 0.8, 0, TAU); ctx.fill();
-      break;
-    case 'rail':
-      ctx.rotate(ang);
-      ctx.fillRect(-4, -2, 22, 4);
-      poly(ctx, 0, 0, 8.5, 4); ctx.fill();
-      break;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = flash > 0 ? '#ffffff' : col;
+    ctx.strokeStyle = col;
+    ctx.shadowColor = col; ctx.shadowBlur = 8;
+    switch (type) {
+      case 'pulse':
+        ctx.rotate(ang);
+        if (branch === 0) { ctx.fillRect(0, -5, 15, 2.5); ctx.fillRect(0, -1.25, 17, 2.5); ctx.fillRect(0, 2.5, 15, 2.5); }      // 개틀링: 3연장
+        else if (branch === 1) { for (const a of [-0.45, 0, 0.45]) { ctx.save(); ctx.rotate(a); ctx.fillRect(0, -2, 14, 4); ctx.restore(); } } // 멀티샷: 부채꼴
+        else ctx.fillRect(0, -3, 15, 6);
+        ctx.beginPath(); ctx.arc(0, 0, 7.5, 0, TAU); ctx.fill();
+        break;
+      case 'mortar':
+        ctx.rotate(ang);
+        ctx.fillRect(0, -5.5, 13, 11);
+        poly(ctx, 0, 0, 10, 8, Math.PI / 8); ctx.fill();
+        ctx.fillStyle = '#131a2c'; ctx.beginPath(); ctx.arc(0, 0, 4, 0, TAU); ctx.fill();
+        break;
+      case 'frost':
+        ctx.rotate(time * 0.8);
+        ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+        for (let i = 0; i < 3; i++) {
+          const a = i / 3 * Math.PI;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * 11, Math.sin(a) * 11); ctx.lineTo(-Math.cos(a) * 11, -Math.sin(a) * 11);
+          ctx.stroke();
+        }
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, TAU); ctx.fill();
+        break;
+      case 'tesla':
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, 0, 10, 0, TAU); ctx.stroke();
+        ctx.beginPath(); ctx.arc(0, 0, 6, 0, TAU); ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(0, 0, 2.5 + Math.sin(time * 14) * 0.8, 0, TAU); ctx.fill();
+        break;
+      case 'rail':
+        ctx.rotate(ang);
+        ctx.fillRect(-4, -2, 22, 4);
+        poly(ctx, 0, 0, 8.5, 4); ctx.fill();
+        break;
+    }
+    ctx.restore();
   }
-  ctx.restore();
 
   ctx.fillStyle = branch != null ? '#ffd166' : '#ffffff';
-  for (let i = 0; i <= level; i++) ctx.fillRect(x - 8 + i * 6, y + 11, 4, 2); // 레벨 표시
+  for (let i = 0; i <= level; i++) ctx.fillRect(x - 8 + i * 6, y + (image?.naturalWidth ? 15 : 11), 4, 2); // 레벨 표시
 }
 
 function drawEnemy(ctx, e, time) {

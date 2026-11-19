@@ -9,6 +9,7 @@ const START_GOLD = 220, START_LIVES = 20, SELL_RATIO = 0.7;
 const INTEREST = 0.05, INTEREST_CAP = 40; // 웨이브 클리어 시 보유 골드의 5% 이자 (최대 50)
 
 // levels[0]: 건설, levels[1]: 1차 강화, branches: 3레벨에서 둘 중 하나를 고르는 특화
+// sprite.pivot은 이미지 안의 회전축(0~1), muzzle은 회전축부터 포구까지의 거리(px)
 const TOWERS = {
   pulse: {
     name: '펄스', key: '1', color: '#4cc9f0',
@@ -30,8 +31,10 @@ const TOWERS = {
       { cost: 80, dmg: 44, range: 165, rate: 1.50, splash: 50 },
     ],
     branches: [
-      { name: '집속탄', desc: '착탄 후 네 발의 자탄이 사방으로 다시 터진다.', cost: 160, dmg: 70, range: 175, rate: 1.40, splash: 52, cluster: 4, cdmg: 62 },
-      { name: '네이팜', desc: '착탄 지점을 3초간 불태워 방어 무시 지속 피해.', cost: 160, dmg: 60, range: 175, rate: 1.50, splash: 55, burn: 28, burnT: 3 },
+      { name: '집속탄', desc: '착탄 후 네 발의 자탄이 사방으로 다시 터진다.', cost: 160, dmg: 70, range: 175, rate: 1.40, splash: 52, cluster: 4, cdmg: 62,
+        sprite: { src: 'assets/towers/mortar-cluster.png', pivot: [0.46, 0.5], muzzle: 17 } },
+      { name: '네이팜', desc: '착탄 지점을 3초간 불태워 방어 무시 지속 피해.', cost: 160, dmg: 60, range: 175, rate: 1.50, splash: 55, burn: 28, burnT: 3,
+        sprite: { src: 'assets/towers/mortar-napalm.png', pivot: [0.51, 0.5], muzzle: 15 } },
     ],
   },
   frost: {
@@ -42,8 +45,10 @@ const TOWERS = {
       { cost: 60, dmg: 8, range: 95, slow: 0.40 },
     ],
     branches: [
-      { name: '절대영도', desc: '강한 감속. 범위 안의 적은 모든 피해를 25% 더 받는다.', cost: 130, dmg: 14, range: 110, slow: 0.55, vuln: 0.25 },
-      { name: '빙결', desc: '4초마다 범위 안 모든 적을 1초간 얼린다. (보스 절반)', cost: 130, dmg: 12, range: 105, slow: 0.40, freeze: 1.0, every: 4 },
+      { name: '절대영도', desc: '강한 감속. 범위 안의 적은 모든 피해를 25% 더 받는다.', cost: 130, dmg: 14, range: 110, slow: 0.55, vuln: 0.25,
+        sprite: { src: 'assets/towers/frost-absolute-zero.png', pivot: [0.5, 0.51] } },
+      { name: '빙결', desc: '4초마다 범위 안 모든 적을 1초간 얼린다. (보스 절반)', cost: 130, dmg: 12, range: 105, slow: 0.40, freeze: 1.0, every: 4,
+        sprite: { src: 'assets/towers/frost-freeze.png', pivot: [0.48, 0.5] } },
     ],
   },
   tesla: {
@@ -54,8 +59,10 @@ const TOWERS = {
       { cost: 100, dmg: 26, range: 120, rate: 0.80, chain: 4 },
     ],
     branches: [
-      { name: '폭풍', desc: '열 번까지 튀며 위력이 거의 줄지 않는다.', cost: 200, dmg: 36, range: 135, rate: 0.70, chain: 10, decay: 0.9 },
-      { name: '과부하', desc: '강한 번개가 맞은 적의 방어력을 영구히 깎는다.', cost: 200, dmg: 80, range: 125, rate: 0.75, chain: 4, decay: 0.85, shred: 2 },
+      { name: '폭풍', desc: '열 번까지 튀며 위력이 거의 줄지 않는다.', cost: 200, dmg: 36, range: 135, rate: 0.70, chain: 10, decay: 0.9,
+        sprite: { src: 'assets/towers/tesla-storm.png', pivot: [0.49, 0.5] } },
+      { name: '과부하', desc: '강한 번개가 맞은 적의 방어력을 영구히 깎는다.', cost: 200, dmg: 80, range: 125, rate: 0.75, chain: 4, decay: 0.85, shred: 2,
+        sprite: { src: 'assets/towers/tesla-overload.png', pivot: [0.51, 0.5] } },
     ],
   },
   rail: {
@@ -66,8 +73,10 @@ const TOWERS = {
       { cost: 140, dmg: 170, range: 290, rate: 2.40 },
     ],
     branches: [
-      { name: '처형자', desc: '맞은 뒤 체력 25% 미만이 된 적은 즉사. (보스 제외)', cost: 300, dmg: 280, range: 330, rate: 2.20, execute: 0.25 },
-      { name: '가우스', desc: '장전 시간을 크게 줄인 연사형 레일건.', cost: 300, dmg: 105, range: 300, rate: 0.95 },
+      { name: '처형자', desc: '맞은 뒤 체력 25% 미만이 된 적은 즉사. (보스 제외)', cost: 300, dmg: 280, range: 330, rate: 2.20, execute: 0.25,
+        sprite: { src: 'assets/towers/rail-executioner.png', pivot: [0.34, 0.5], muzzle: 23 } },
+      { name: '가우스', desc: '장전 시간을 크게 줄인 연사형 레일건.', cost: 300, dmg: 105, range: 300, rate: 0.95,
+        sprite: { src: 'assets/towers/rail-gauss.png', pivot: [0.41, 0.5], muzzle: 17 } },
     ],
   },
 };

@@ -372,7 +372,8 @@ class Game {
     if (target) t.ang = Math.atan2(target.y - t.y, target.x - t.x);
     if (t.cd > 0 || !target) return;
     t.cd = s.rate; t.flash = 0.06;
-    const mx = t.x + Math.cos(t.ang) * 16, my = t.y + Math.sin(t.ang) * 16;
+    const muzzle = s.sprite?.muzzle ?? 16;
+    const mx = t.x + Math.cos(t.ang) * muzzle, my = t.y + Math.sin(t.ang) * muzzle;
 
     switch (t.type) {
       case 'pulse':
