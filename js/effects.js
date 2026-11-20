@@ -83,6 +83,8 @@ const Sfx = {
       case 'mortar':  this.tone(170, 0.16, 'sawtooth', 0.04, -90); break;
       case 'tesla':   this.tone(1300, 0.09, 'sawtooth', 0.025, -900); break;
       case 'rail':    this.tone(1900, 0.3, 'sawtooth', 0.05, -1800); this.noise(0.12, 0.04); break;
+      case 'laser':   this.tone(980, 0.12, 'sine', 0.03, 600); break;
+      case 'missile': this.tone(260, 0.18, 'sawtooth', 0.03, 500); this.noise(0.1, 0.03); break;
       case 'boom':    this.noise(0.25, 0.09); break;
       case 'kill':    this.tone(320, 0.07, 'triangle', 0.035, 260); break;
       case 'build':   this.tone(420, 0.08, 'triangle', 0.06, 200); break;

@@ -99,6 +99,27 @@ function drawTower(ctx, type, level, x, y, ang, time, flash, branch = null) {
         ctx.fillRect(-4, -2, 22, 4);
         poly(ctx, 0, 0, 8.5, 4); ctx.fill();
         break;
+      case 'laser':
+        ctx.rotate(ang);
+        if (branch === 1) { for (const a of [-0.35, 0, 0.35]) { ctx.save(); ctx.rotate(a); ctx.fillRect(4, -1.5, 11, 3); ctx.restore(); } } // 분광: 세 갈래 렌즈
+        else ctx.fillRect(0, -2.5, branch === 0 ? 17 : 14, 5);
+        poly(ctx, 0, 0, 8, 4, Math.PI / 4); ctx.fill();
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0, 0, 2.5, 0, TAU); ctx.fill();
+        break;
+      case 'amp': {
+        const p = 1 + Math.sin(time * 3) * 0.12;
+        ctx.lineWidth = 2;
+        poly(ctx, 0, 0, 11, 6, Math.PI / 6); ctx.stroke();
+        if (branch === 1) { ctx.lineWidth = 1; poly(ctx, 0, 0, 14, 6, Math.PI / 6); ctx.stroke(); } // 공명장: 바깥 고리
+        poly(ctx, 0, 0, (branch === 0 ? 7 : 5.5) * p, 6, Math.PI / 6); ctx.fill();
+        break;
+      }
+      case 'missile':
+        ctx.rotate(ang);
+        for (const oy of branch === 0 ? [-8, -3, 2, 7] : [-6, 2]) ctx.fillRect(-5, oy - 1, 15, branch === 0 ? 3 : 4); // 발사관
+        ctx.beginPath(); ctx.arc(-2, 0, 6, 0, TAU); ctx.fill();
+        if (branch === 1) { ctx.fillStyle = '#48cae4'; ctx.beginPath(); ctx.arc(-2, 0, 2.5, 0, TAU); ctx.fill(); }
+        break;
     }
     ctx.restore();
   }
@@ -242,6 +263,17 @@ function render(ctx, game, ui, scale) {
     ctx.beginPath(); ctx.arc(tw.x, tw.y, range * k, 0, TAU); ctx.stroke();
   }
 
+  // 증폭기와 강화받는 타워를 잇는 선
+  ctx.setLineDash([3, 5]); ctx.lineDashOffset = -t * 20;
+  ctx.strokeStyle = 'rgba(128,255,219,0.35)'; ctx.lineWidth = 1.5;
+  for (const tw of game.towers) {
+    if (!tw.def.support || !tw.links?.length) continue;
+    ctx.beginPath();
+    for (const o of tw.links) { ctx.moveTo(tw.x, tw.y); ctx.lineTo(o.x, o.y); }
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
   // 네이팜 불길
   for (const z of game.zones) {
     const k = Math.min(1, z.t / 0.4), fl = 0.85 + Math.sin(t * 30 + z.x) * 0.15;
@@ -259,6 +291,13 @@ function render(ctx, game, ui, scale) {
   ctx.shadowBlur = 10;
   for (const s of game.shots) {
     ctx.fillStyle = s.color; ctx.shadowColor = s.color;
+    if (s.kind === 'missile') {
+      ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.ang);
+      ctx.fillRect(-5, -1.5, 10, 3);
+      ctx.fillStyle = '#ffd166'; ctx.fillRect(-9, -1, 4, 2); // 분사 불꽃
+      ctx.restore();
+      continue;
+    }
     ctx.beginPath(); ctx.arc(s.x, s.y, s.kind === 'shell' ? 4.5 : 3, 0, TAU); ctx.fill();
   }
   ctx.restore();
@@ -267,6 +306,19 @@ function render(ctx, game, ui, scale) {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const tw of game.towers) { // 레이저: 배율이 오를수록 굵고 밝아진다
+    if (tw.type !== 'laser' || !tw.beams?.length) continue;
+    const s = game.stats(tw), k = Math.min(1, tw.lockT / s.rampT);
+    const sx = tw.x + Math.cos(tw.ang) * 14, sy = tw.y + Math.sin(tw.ang) * 14;
+    for (const e of tw.beams) {
+      if (!e.alive) continue;
+      const ex = e.x + e.ox, ey = e.y + e.oy - (e.flying ? 10 : 0);
+      ctx.globalAlpha = 0.45 + 0.4 * k; ctx.strokeStyle = tw.def.color; ctx.lineWidth = 2 + k * 3 + Math.sin(t * 40) * 0.4;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.8 + k; ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
   for (const b of fx.beams) {
     const k = b.life / b.max;
     ctx.globalAlpha = k; ctx.strokeStyle = b.color; ctx.lineWidth = b.width * (0.4 + k);

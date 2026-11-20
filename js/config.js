@@ -66,7 +66,7 @@ const TOWERS = {
       { cost: 100, dmg: 26, range: 120, rate: 0.80, chain: 4 },
     ],
     branches: [
-      { name: '폭풍', desc: '열 번까지 튀며 위력이 거의 줄지 않는다.', cost: 200, dmg: 36, range: 135, rate: 0.70, chain: 10, decay: 0.9,
+      { name: '폭풍', desc: '멀리 떨어진 적에게도 열 번까지 튄다. 튈 때마다 위력 10% 감소.', cost: 200, dmg: 42, range: 175, rate: 0.65, chain: 10, decay: 0.9, jump: 250,
         sprite: { src: 'assets/towers/tesla-storm.png', pivot: [0.49, 0.5] } },
       { name: '과부하', desc: '강한 번개가 맞은 적의 방어력을 영구히 깎는다.', cost: 200, dmg: 80, range: 125, rate: 0.75, chain: 4, decay: 0.85, shred: 2,
         sprite: { src: 'assets/towers/tesla-overload.png', pivot: [0.51, 0.5] } },
@@ -84,6 +84,45 @@ const TOWERS = {
         sprite: { src: 'assets/towers/rail-executioner.png', pivot: [0.34, 0.5], muzzle: 23 } },
       { name: '가우스', desc: '장전 시간을 크게 줄인 연사형 레일건.', cost: 300, dmg: 105, range: 300, rate: 0.95,
         sprite: { src: 'assets/towers/rail-gauss.png', pivot: [0.41, 0.5], muzzle: 17 } },
+    ],
+  },
+  // ramp: 한 대상을 계속 비추면 rampT초에 걸쳐 피해가 ramp배까지 오른다 (대상이 바뀌면 초기화)
+  laser: {
+    name: '레이저', key: '6', color: '#e9ff70',
+    desc: '한 대상을 붙잡고 비출수록 피해가 커진다. 대상이 바뀌면 처음부터. 오래 버티는 보스에 강하다.',
+    levels: [
+      { cost: 90, dmg: 8, range: 120, rate: 0.25, ramp: 2, rampT: 3 },
+      { cost: 80, dmg: 15, range: 130, rate: 0.25, ramp: 2.5, rampT: 3 },
+    ],
+    branches: [
+      { name: '집속광', desc: '3초에 걸쳐 피해가 4배까지 오르는 단일 광선.', cost: 180, dmg: 30, range: 140, rate: 0.25, ramp: 4, rampT: 3 },
+      { name: '분광', desc: '광선을 세 갈래로 나눠 동시에 비춘다. 배율은 주 대상 기준.', cost: 180, dmg: 18, range: 135, rate: 0.25, ramp: 2.5, rampT: 2, multi: 3 },
+    ],
+  },
+  // support: 직접 공격하지 않고 범위 안 다른 타워의 피해(buff)·연사(haste)를 올린다. 여러 증폭기는 중첩되지 않는다
+  amp: {
+    name: '증폭기', key: '7', color: '#80ffdb', support: true,
+    desc: '공격하지 않는 대신 주변 8칸 타워의 피해를 올린다. 중첩되지 않는다.',
+    levels: [
+      { cost: 80, range: 60, buff: 0.2 },
+      { cost: 70, range: 60, buff: 0.3 },
+    ],
+    branches: [
+      { name: '과충전', desc: '주변 8칸 타워의 피해 +60%.', cost: 150, range: 60, buff: 0.6 },
+      { name: '공명장', desc: '두 칸 거리까지 넓어지고 피해 +30%, 연사 +20%.', cost: 150, range: 100, buff: 0.3, haste: 0.2 },
+    ],
+  },
+  // air: 공중 적에게 주는 피해 배율 / emp: 착탄 범위의 실드를 없애고 그 시간(초)만큼 재생을 막는다
+  missile: {
+    name: '미사일', key: '8', color: '#ff6b35',
+    desc: '유도 미사일이 착탄 지점에 범위 피해. 공중 적에게 두 배.',
+    levels: [
+      { cost: 90, dmg: 28, range: 175, rate: 1.6, splash: 32, air: 2 },
+      { cost: 130, dmg: 52, range: 190, rate: 1.5, splash: 36, air: 2 },
+    ],
+    branches: [
+      { name: '벌떼', desc: '네 대상에게 동시에 미사일을 날린다. 공중 피해 2.5배.', cost: 200, dmg: 50, range: 210, rate: 1.4, splash: 34, air: 2.5, multi: 4 },
+      { name: 'EMP', desc: '넓은 폭발이 실드를 벗기고 3초간 재생을 막는다.', cost: 200, dmg: 110, range: 200, rate: 1.3, splash: 60, air: 2, emp: 3 },
     ],
   },
 };

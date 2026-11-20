@@ -31,7 +31,7 @@ function fit() {
 }
 window.addEventListener('resize', fit);
 
-// ── 상점 (스킬 2 + 타워 5) ───────────────────────────────────
+// ── 상점 (스킬 2 + 타워 8) ───────────────────────────────────
 const tip = Object.assign(document.createElement('div'), { id: 'tip' });
 function buildShop() {
   shop.innerHTML = '';
@@ -211,17 +211,28 @@ function syncPanel() {
   const s = game.stats(t), n = t.level === 0 ? t.def.levels[1] : null;
   const row = (label, cur, nxt, unit = '') =>
     `<tr><td>${label}</td><td>${cur}${unit}${nxt != null && nxt !== cur ? ` <span class="up">→ ${nxt}${unit}</span>` : ''}</td></tr>`;
-  const rows = [row(t.type === 'frost' ? '초당 피해' : '피해', s.dmg, n?.dmg), row('사거리', s.range, n?.range)];
-  if (s.rate) rows.push(row('공격 간격', s.rate.toFixed(2), n?.rate.toFixed(2), '초'));
-  if (s.splash) rows.push(row('폭발 반경', s.splash, n?.splash));
-  if (s.slow) rows.push(row('감속', Math.round(s.slow * 100), n && Math.round(n.slow * 100), '%'));
-  if (s.chain) rows.push(row('연쇄', s.chain, n?.chain, '회'));
-  rows.push('<tr><td>누적 피해</td><td class="dealt"></td></tr>');
+  const pct = v => v && Math.round(v * 100);
+  const rows = [];
+  if (t.def.support) {
+    rows.push(row('피해 증폭', pct(s.buff), n && pct(n.buff), '%'), row('범위', s.range, n?.range));
+    if (s.haste) rows.push(row('연사 증폭', pct(s.haste), null, '%'));
+    rows.push('<tr><td>강화 중</td><td class="dealt"></td></tr>');
+  } else {
+    rows.push(row(t.type === 'frost' ? '초당 피해' : '피해', s.dmg, n?.dmg), row('사거리', s.range, n?.range));
+    if (s.rate) rows.push(row('공격 간격', s.rate.toFixed(2), n?.rate.toFixed(2), '초'));
+    if (s.ramp) rows.push(row('최대 배율', '×' + s.ramp, n && '×' + n.ramp));
+    if (s.splash) rows.push(row('폭발 반경', s.splash, n?.splash));
+    if (s.air) rows.push(row('공중 피해', '×' + s.air, n && '×' + n.air));
+    if (s.slow) rows.push(row('감속', pct(s.slow), n && pct(n.slow), '%'));
+    if (s.chain) rows.push(row('연쇄', s.chain, n?.chain, '회'));
+    if (t.buff) rows.push(row('증폭 받음', `+${pct(t.buff)}%` + (t.haste ? ` · 연사 +${pct(t.haste)}%` : ''), null));
+    rows.push('<tr><td>누적 피해</td><td class="dealt"></td></tr>');
+  }
 
   const title = t.branch != null ? t.def.branches[t.branch].name : t.def.name;
   let html = `<h3 style="color:${t.def.color}">${title}<small>Lv.${t.level + 1}</small></h3>` +
     (t.branch != null ? `<p class="spec">${t.def.branches[t.branch].desc}</p>` : '') + `<table>${rows.join('')}</table>`;
-  if (t.type !== 'frost') html += `<div class="row"><button data-act="mode">조준: ${TARGET_MODES[t.mode]} <kbd>T</kbd></button></div>`;
+  if (t.type !== 'frost' && !t.def.support) html += `<div class="row"><button data-act="mode">조준: ${TARGET_MODES[t.mode]} <kbd>T</kbd></button></div>`;
   if (t.level === 1) { // 특화 분기 선택
     html += '<div class="branches">' + t.def.branches.map((b, i) =>
       `<button data-act="br" data-b="${i}" ${game.gold < b.cost ? 'disabled' : ''}>
@@ -230,10 +241,10 @@ function syncPanel() {
     const cost = game.upgradeCost(t);
     html += `<div class="row"><button data-act="up" class="primary" ${game.gold < cost ? 'disabled' : ''}>강화 ${cost}G <kbd>U</kbd></button></div>`;
   }
-  html += `<div class="row"><button data-act="sell" class="danger">판매 +${Math.floor(t.spent * SELL_RATIO)}G <kbd>X</kbd></button></div>`;
+  html += `<div class="row"><button data-act="sell" class="danger">판매 +${Math.floor(t.spent * (SELL_RATIO * 100) / 100)}G <kbd>X</kbd></button></div>`;
 
   if (html !== panelHtml) { panelHtml = html; panel.innerHTML = html; }
-  const d = panel.querySelector('.dealt'), v = fmt(t.dealt);
+  const d = panel.querySelector('.dealt'), v = t.def.support ? `타워 ${t.links.length}기` : fmt(t.dealt);
   if (d.textContent !== v) d.textContent = v; // 매 프레임 바뀌는 값은 패널을 다시 만들지 않고 이 칸만 갱신
   set('#panel', false, 'hidden');
   // 타워를 가리지 않도록 반대편에 배치
@@ -255,7 +266,7 @@ function showMenu() {
         <div class="b">${best[m.id] ? `최고 기록: 웨이브 ${best[m.id]}` : '기록 없음'}</div>
       </button>`).join('')}</div>
     <div class="help">
-      <kbd>1</kbd>–<kbd>5</kbd> 타워 선택 · 클릭으로 배치 · <kbd>U</kbd> 강화 · <kbd>A</kbd>/<kbd>B</kbd> 3레벨 특화 · <kbd>X</kbd> 판매 · <kbd>T</kbd> 조준 변경<br>
+      <kbd>1</kbd>–<kbd>${Object.keys(TOWERS).length}</kbd> 타워 선택 · 클릭으로 배치 · <kbd>U</kbd> 강화 · <kbd>A</kbd>/<kbd>B</kbd> 3레벨 특화 · <kbd>X</kbd> 판매 · <kbd>T</kbd> 조준 변경<br>
       <kbd>Q</kbd> 궤도 폭격 · <kbd>E</kbd> 시간 정지 · <kbd>N</kbd> 웨이브 호출 · <kbd>F</kbd> 배속 · <kbd>Space</kbd> 일시정지 · <kbd>M</kbd> 소리
     </div></div>`;
   overlay.querySelectorAll('.map').forEach(b => {

@@ -69,14 +69,14 @@ kbd {
 
 /* ── 상점 ── */
 #shop {
-  display: flex; justify-content: center; gap: 8px; padding: 8px 14px;
+  display: flex; justify-content: center; gap: 6px; padding: 8px 14px;
   background: var(--panel); border-top: 1px solid var(--line); flex-wrap: wrap;
 }
 .card {
-  display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px; text-align: left;
-  min-width: 150px; position: relative;
+  display: flex; align-items: center; gap: 8px; padding: 6px 25px 6px 6px; text-align: left;
+  position: relative;
 }
-.card canvas { width: 44px; height: 44px; flex: none; }
+.card canvas { width: 38px; height: 38px; flex: none; }
 .card .nm { font-weight: 600; }
 .card .cost { color: var(--gold); font-size: 13px; font-variant-numeric: tabular-nums; }
 .card kbd { position: absolute; top: 5px; right: 6px; }
@@ -119,7 +119,7 @@ kbd {
 
 /* ── 스킬·특화·변이 ── */
 .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
-.card.skill { min-width: 128px; padding-left: 10px; overflow: hidden; }
+.card.skill { padding-left: 10px; overflow: hidden; }
 .card.skill .glyph { width: 26px; height: 26px; flex: none; }
 .card.skill .cd { color: var(--c); }
 .card.skill.cooling .glyph { opacity: .35; }

@@ -18,6 +18,7 @@ class Game {
     this.spawns = map.spawns;
     this.core = map.core;
     this.coreX = cx(map.core[0]); this.coreY = cx(map.core[1]);
+    this.rng = mulberry32(0x6d2b79f5);
     this.towers = []; this.enemies = []; this.shots = []; this.zones = [];
     this.fx = new Effects();
     this.gold = START_GOLD; this.lives = START_LIVES;
@@ -98,7 +99,8 @@ class Game {
     const def = TOWERS[type], cost = def.levels[0].cost;
     if (this.gold < cost || !this.canBuild(c, r)) return null;
     this.gold -= cost;
-    const t = { type, def, level: 0, branch: null, c, r, x: cx(c), y: cx(r), cd: 0, ang: -Math.PI / 2, mode: 'first', spent: cost, dealt: 0, flash: 0 };
+    const t = { type, def, level: 0, branch: null, c, r, x: cx(c), y: cx(r), cd: 0, ang: -Math.PI / 2, mode: 'first', spent: cost, dealt: 0, flash: 0,
+      buff: 0, haste: 0, links: [], lock: null, lockT: 0, beams: [] };
     this.towers.push(t);
     this.grid[idx(c, r)] = 2;
     this.refreshField();
@@ -109,6 +111,28 @@ class Game {
 
   // 현재 레벨의 능력치 (3레벨은 고른 특화의 능력치)
   stats(t) { return t.level < 2 ? t.def.levels[t.level] : t.def.branches[t.branch]; }
+
+  // 증폭기 효과까지 반영한 실제 능력치
+  buffed(t) {
+    const s = this.stats(t);
+    if (!t.buff && !t.haste) return s;
+    const m = 1 + t.buff;
+    return { ...s, dmg: s.dmg * m, cdmg: s.cdmg && s.cdmg * m, burn: s.burn && s.burn * m, rate: s.rate && s.rate / (1 + t.haste) };
+  }
+
+  // 증폭기 범위 안의 타워마다 가장 강한 증폭 하나만 적용한다
+  applyBuffs() {
+    for (const t of this.towers) { t.buff = 0; t.haste = 0; t.links = []; }
+    for (const a of this.towers) {
+      if (!a.def.support) continue;
+      const s = this.stats(a);
+      for (const t of this.towers) {
+        if (t.def.support || Math.hypot(t.x - a.x, t.y - a.y) > s.range) continue;
+        t.buff = Math.max(t.buff, s.buff); t.haste = Math.max(t.haste, s.haste || 0);
+        a.links.push(t);
+      }
+    }
+  }
 
   // 1레벨 → 2레벨은 단일 강화, 2레벨 → 3레벨은 특화 b(0 또는 1)를 골라야 한다
   upgradeCost(t, b = 0) {
@@ -132,7 +156,7 @@ class Game {
   }
 
   sell(t) {
-    this.gold += Math.floor(t.spent * SELL_RATIO);
+    this.gold += Math.floor(t.spent * (SELL_RATIO * 100) / 100);
     this.towers.splice(this.towers.indexOf(t), 1);
     this.grid[idx(t.c, t.r)] = 0;
     this.refreshField();
@@ -236,6 +260,7 @@ class Game {
     }
     for (const e of this.enemies) this.updateEnemy(e, dt);
     for (const z of this.zones) this.updateZone(z, dt);
+    this.applyBuffs();
     for (const t of this.towers) this.updateTower(t, dt);
     for (const s of this.shots) this.updateShot(s, dt);
     this.enemies = this.enemies.filter(e => e.alive);
@@ -357,8 +382,27 @@ class Game {
   }
 
   updateTower(t, dt) {
-    const s = this.stats(t);
+    if (t.def.support) return;
+    const s = this.buffed(t);
     t.cd -= dt; t.flash -= dt;
+
+    if (t.type === 'laser') { // 주 대상이 살아서 사거리 안에 있는 동안 놓지 않고 배율을 쌓는다
+      const keep = t.lock?.alive && Math.hypot(t.lock.x - t.x, t.lock.y - t.y) <= s.range;
+      if (keep) t.lockT += dt;
+      else {
+        t.lock = this.findTargets(t, s.range)[0] || null; t.lockT = 0;
+        if (t.lock) Sfx.play('laser');
+      }
+      t.beams = !t.lock ? [] : s.multi
+        ? [t.lock, ...this.findTargets(t, s.range, s.multi).filter(e => e !== t.lock).slice(0, s.multi - 1)] : [t.lock];
+      if (!t.lock) return;
+      t.ang = Math.atan2(t.lock.y - t.y, t.lock.x - t.x);
+      if (t.cd > 0) return;
+      t.cd = s.rate;
+      const dmg = s.dmg * (1 + (s.ramp - 1) * Math.min(1, t.lockT / s.rampT));
+      for (const e of t.beams) this.damage(e, dmg, t, false, true);
+      return;
+    }
 
     if (t.type === 'frost') { // 오라: 매 프레임 범위 내 전체에 감속 + 지속 피해
       const inRange = this.enemies.filter(e => e.alive && Math.hypot(e.x - t.x, e.y - t.y) <= s.range);
@@ -392,6 +436,12 @@ class Game {
           this.shots.push({ kind: 'bullet', x: mx, y: my, target: tg, dmg: s.dmg, color: t.def.color, src: t });
         Sfx.play('pulse');
         break;
+      case 'missile':
+        for (const tg of targets)
+          this.shots.push({ kind: 'missile', x: mx, y: my, ang: t.ang, target: tg, tx: tg.x, ty: tg.y,
+            dmg: s.dmg, splash: s.splash, air: s.air, emp: s.emp, color: t.def.color, src: t });
+        Sfx.play('missile');
+        break;
       case 'mortar': {
         const d = Math.hypot(target.x - t.x, target.y - t.y);
         this.shots.push({ kind: 'shell', sx: mx, sy: my, x: mx, y: my, tx: target.x, ty: target.y, t: 0, dur: 0.3 + d / 420,
@@ -407,7 +457,7 @@ class Game {
           if (s.shred) cur.armor = Math.max(0, cur.armor - s.shred);
           this.damage(cur, dmg, t, false);
           px = cur.x; py = cur.y; dmg *= s.decay || 0.75;
-          let next = null, nd = 85;
+          let next = null, nd = s.jump || 85;
           for (const e of this.enemies) {
             if (!e.alive || hit.has(e)) continue;
             const d = Math.hypot(e.x - px, e.y - py);
@@ -456,6 +506,25 @@ class Game {
       } else { s.x += dx / d * step; s.y += dy / d * step; }
       return;
     }
+    if (s.kind === 'missile') { // 유도 미사일: 대상이 먼저 죽으면 마지막 위치에서 터진다
+      if (s.target.alive) { s.tx = s.target.x; s.ty = s.target.y; }
+      const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy), step = 300 * dt;
+      s.ang = Math.atan2(dy, dx);
+      if (d > step + 4) { s.x += dx / d * step; s.y += dy / d * step; return; }
+      for (const e of this.enemies) {
+        if (!e.alive) continue;
+        const r = Math.hypot(e.x - s.tx, e.y - s.ty);
+        if (r > s.splash + e.def.r) continue;
+        if (s.emp && e.maxShield) e.shield = 0;
+        this.damage(e, s.dmg * (e.flying ? s.air : 1) * (1 - 0.5 * Math.min(1, r / s.splash)), s.src, false);
+        if (s.emp && e.maxShield) e.shieldT = Math.max(e.shieldT, s.emp); // damage()가 넣은 2초보다 길게 재생을 막는다
+      }
+      this.fx.ring(s.tx, s.ty, s.splash, s.emp ? '#48cae4' : s.color, 0.3);
+      this.fx.burst(s.tx, s.ty, s.color, 10, 130);
+      Sfx.play('boom');
+      s.dead = true;
+      return;
+    }
     // 포물선 포탄 → 착탄 시 범위 피해 (거리에 따라 감쇠)
     s.t += dt / s.dur;
     const k = Math.min(1, s.t);
@@ -468,7 +537,7 @@ class Game {
       if (d <= s.splash + e.def.r) this.damage(e, s.dmg * (1 - 0.5 * Math.min(1, d / s.splash)), s.src, false);
     }
     if (s.cluster) for (let i = 0; i < s.cluster; i++) { // 자탄 산개
-      const a = i / s.cluster * TAU_G + Math.random() * 0.6;
+      const a = i / s.cluster * TAU_G + this.rng() * 0.6;
       this.shots.push({ kind: 'shell', sub: true, sx: s.tx, sy: s.ty, x: s.tx, y: s.ty, tx: s.tx + Math.cos(a) * 40, ty: s.ty + Math.sin(a) * 40,
         t: 0, dur: 0.22, dmg: s.cdmg, splash: 30, color: s.color, src: s.src });
     }
