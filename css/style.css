@@ -31,7 +31,20 @@ body {
 #preview .en { display: flex; align-items: center; gap: 4px; color: var(--text); }
 #preview .dot { width: 9px; height: 9px; border-radius: 50%; }
 #preview .en img { width: 16px; height: 16px; flex: none; }
+#preview .en { cursor: help; }
+#entip {
+  position: fixed; z-index: 60; pointer-events: none; display: none;
+  max-width: 300px; padding: 9px 11px; font-size: 12px; line-height: 1.55;
+  background: #0e1424f5; border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 6px 24px #000000aa; color: var(--text);
+}
+#entip.show { display: block; }
+#entip b { font-size: 13px; }
 .spacer { flex: 1; }
+#dailyTag {
+  font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--gold);
+  padding: 3px 10px; border: 1px solid #ffd16655; border-radius: 99px; background: #ffd16611;
+}
 
 button {
   font: inherit; color: var(--text); background: #141c31; border: 1px solid var(--line);
@@ -109,6 +122,8 @@ kbd {
 .map .t em { font-style: normal; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 99px; background: #ffffff14; color: var(--dim); }
 .map .d { color: var(--dim); font-size: 12.5px; margin: 4px 0 6px; min-height: 36px; }
 .map .b { font-size: 12px; color: var(--gold); }
+.map.daily .t em { color: var(--gold); background: #ffd16614; }
+.map.daily:hover:not(:disabled) { border-color: var(--gold); box-shadow: 0 0 24px #ffd16633; }
 .help { margin-top: 22px; color: var(--dim); font-size: 12.5px; line-height: 1.9; }
 .results { display: flex; justify-content: center; gap: 12px; margin: 18px 0 24px; }
 .results div { padding: 12px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-width: 110px; }
