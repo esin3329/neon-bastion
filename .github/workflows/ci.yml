@@ -1,0 +1,22 @@
+# 밸런스·규칙 회귀 검사 — 풀 리퀘스트와 main 푸시마다 헤드리스 검증 슈트 실행
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 타워·효과 규칙 검증
+        run: |
+          node tools/check-towers.js
+          node tools/check-effects.js
+      - name: 밸런스 회귀 검사 (3맵 밴드)
+        run: node tools/balance.js check

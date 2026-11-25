@@ -10,8 +10,9 @@ const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 const TARGET_MODES = { first: '선두', strong: '최강', close: '근접' };
 
 class Game {
-  constructor(map) {
+  constructor(map, seed = 0) {
     this.map = map;
+    this.seed = seed;          // 웨이브 구성 시드 (0: 표준, 그 외: 일일 챌린지 등)
     this.grid = new Uint8Array(COLS * ROWS); // 0 빈칸, 1 바위, 2 타워
     for (const [c, r, w, h] of map.rocks)
       for (let y = r; y < r + h; y++) for (let x = c; x < c + w; x++) this.grid[idx(x, y)] = 1;
@@ -200,7 +201,7 @@ class Game {
       this.fx.text(this.coreX, this.coreY - 30, `조기 호출 +${bonus}`, '#ffd166');
     }
     this.wave++;
-    const wv = genWave(this.wave);
+    const wv = genWave(this.wave, this.seed);
     this.mod = wv.mod;
     this.queue = [];
     wv.groups.forEach((g, gi) => {
@@ -342,7 +343,7 @@ class Game {
     if (!e.alive) return;
     let d = pierce ? dmg : Math.max(dmg * 0.15, dmg - e.armor);
     if (e.vulnT > 0) d *= 1 + e.vuln;
-    if (e.maxShield) e.shieldT = 2;
+    if (e.maxShield) e.shieldT = SHIELD_REGEN_DELAY;
     if (e.shield > 0) {
       const a = Math.min(e.shield, d);
       e.shield -= a; d -= a;

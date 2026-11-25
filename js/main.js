@@ -14,11 +14,13 @@ const fmt = n => n >= 10000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n)
 
 // ── 최고 기록 (localStorage) ─────────────────────────────────
 const BEST_KEY = 'neon-bastion.best';
+const MUTE_KEY = 'neon-bastion.muted';
 function loadBest() { try { return JSON.parse(localStorage.getItem(BEST_KEY)) || {}; } catch (e) { return {}; } }
 function saveBest(id, wave) {
   const b = loadBest();
   if (wave > (b[id] || 0)) { b[id] = wave; try { localStorage.setItem(BEST_KEY, JSON.stringify(b)); } catch (e) { /* 저장 불가 환경 */ } }
 }
+function loadMuted() { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch (e) { return false; } }
 const clearedWaves = () => game.state === 'wave' || game.state === 'lost' ? game.wave - 1 : game.wave;
 
 // ── 화면 크기 대응: 논리 해상도 960×560을 창에 맞게 확대 ──────
@@ -159,7 +161,34 @@ $('#btnMenu').onclick = () => { saveBest(game.map.id, clearedWaves()); showMenu(
 
 function cycleSpeed() { speed = speed === 1 ? 2 : speed === 2 ? 4 : 1; $('#btnSpeed').textContent = `×${speed}`; }
 function togglePause() { if (!running || ended) return; paused = !paused; $('#btnPause').textContent = paused ? '계속하기' : '일시정지'; }
-function toggleMute() { Sfx.muted = !Sfx.muted; $('#btnMute').textContent = Sfx.muted ? '소리 끔' : '소리 켬'; }
+function toggleMute() {
+  Sfx.muted = !Sfx.muted;
+  $('#btnMute').textContent = Sfx.muted ? '소리 끔' : '소리 켬';
+  try { localStorage.setItem(MUTE_KEY, Sfx.muted ? '1' : '0'); } catch (e) { /* 저장 불가 환경 */ }
+}
+if (loadMuted()) { Sfx.muted = true; $('#btnMute').textContent = '소리 끔'; }
+
+// ── 상성 툴팁: 미리보기의 적에 마우스를 올리면 약점 안내 ─────
+const entip = Object.assign(document.createElement('div'), { id: 'entip' });
+document.body.appendChild(entip);
+function moveEntip(ev) {
+  const r = entip.getBoundingClientRect();
+  let x = ev.clientX + 14, y = ev.clientY + 18;
+  if (x + r.width + 8 > innerWidth) x = ev.clientX - r.width - 10;
+  if (y + r.height + 8 > innerHeight) y = ev.clientY - r.height - 12;
+  entip.style.left = x + 'px'; entip.style.top = y + 'px';
+}
+$('#preview').addEventListener('mouseover', ev => {
+  const en = ev.target.closest('.en'), def = en && ENEMIES[en.dataset.type];
+  if (!def || !def.tip) return;
+  entip.innerHTML = `<b style="color:${def.color}">${def.name}</b> — ${def.tip}`;
+  entip.classList.add('show');
+  moveEntip(ev);
+});
+$('#preview').addEventListener('mousemove', ev => { if (entip.classList.contains('show')) moveEntip(ev); });
+$('#preview').addEventListener('mouseout', ev => {
+  if (!ev.relatedTarget || !ev.relatedTarget.closest?.('.en')) entip.classList.remove('show');
+});
 
 // ── HUD 동기화: 값이 바뀐 요소만 DOM 갱신 ─────────────────────
 const cache = {};
@@ -174,18 +203,19 @@ function syncUI() {
   set('#wave', game.endless ? `${game.wave}` : `${game.wave} / ${TOTAL_WAVES}`);
 
   const inWave = game.state === 'wave';
+  set('#dailyTag', !game.daily, 'hidden');
   set('#btnWave', !running || inWave || ended, 'disabled');
   set('#btnWave', inWave ? '전투 중…' : game.countdown > 0
     ? `지금 호출 +${Math.ceil(game.countdown) * 2}G <kbd>N</kbd>` : '웨이브 시작 <kbd>N</kbd>', 'innerHTML');
 
   // 다음(또는 현재) 웨이브 구성과 변이 미리보기
-  const wv = genWave(inWave ? game.wave : game.wave + 1), mod = wv.mod && MODS[wv.mod];
+  const wv = genWave(inWave ? game.wave : game.wave + 1, game.seed), mod = wv.mod && MODS[wv.mod];
   set('#preview', (inWave ? '현재' : '다음') +
     (mod ? ` <span class="mod" style="--c:${mod.color}" title="${mod.desc}">${mod.name} · ${mod.desc}</span>` : '') +
     wv.groups.map(({ type, count }) => {
       const { name, color, icon } = ENEMIES[type];
       const marker = enemyIcons[type]?.naturalWidth ? `<img src="${icon}" alt="">` : `<i class="dot" style="background:${color}"></i>`;
-      return `<span class="en">${marker}${name}×${count}</span>`;
+      return `<span class="en" data-type="${type}">${marker}${name}×${count}</span>`;
     }).join(''), 'innerHTML');
 
   for (const c of shop.querySelectorAll('.card')) {
@@ -255,6 +285,7 @@ function syncPanel() {
 function showMenu() {
   running = false; ended = false; paused = false; setBuild(null);
   const best = loadBest();
+  const dseed = dailySeed(), dmap = MAPS[dailyMapIndex(dseed)], dkey = 'daily:' + dseed;
   overlay.innerHTML = `<div class="modal">
     <h1>NEON<b>BASTION</b></h1>
     <p>타워로 미로를 설계해 ${TOTAL_WAVES}번의 웨이브로부터 코어를 지켜라</p>
@@ -264,16 +295,25 @@ function showMenu() {
         <div class="t">${m.name}<em>${m.diff}</em></div>
         <div class="d">${m.desc}</div>
         <div class="b">${best[m.id] ? `최고 기록: 웨이브 ${best[m.id]}` : '기록 없음'}</div>
-      </button>`).join('')}</div>
+      </button>`).join('')}
+      <button class="map daily" data-daily="1">
+        <canvas width="480" height="280"></canvas>
+        <div class="t">일일 챌린지<em>${dailyLabel(dseed)}</em></div>
+        <div class="d">오늘의 맵: ${dmap.name} — 같은 날엔 누구나 같은 구성으로 플레이합니다.</div>
+        <div class="b">${best[dkey] ? `오늘의 기록: 웨이브 ${best[dkey]}` : '오늘 첫 도전'}</div>
+      </button></div>
     <div class="help">
       <kbd>1</kbd>–<kbd>${Object.keys(TOWERS).length}</kbd> 타워 선택 · 클릭으로 배치 · <kbd>U</kbd> 강화 · <kbd>A</kbd>/<kbd>B</kbd> 3레벨 특화 · <kbd>X</kbd> 판매 · <kbd>T</kbd> 조준 변경<br>
       <kbd>Q</kbd> 궤도 폭격 · <kbd>E</kbd> 시간 정지 · <kbd>N</kbd> 웨이브 호출 · <kbd>F</kbd> 배속 · <kbd>Space</kbd> 일시정지 · <kbd>M</kbd> 소리
     </div></div>`;
-  overlay.querySelectorAll('.map').forEach(b => {
+  overlay.querySelectorAll('.map[data-map]').forEach(b => {
     const m = MAPS[b.dataset.map];
     drawThumb(b.querySelector('canvas').getContext('2d'), m);
     b.onclick = () => startGame(m);
   });
+  const dbtn = overlay.querySelector('.map[data-daily]');
+  drawThumb(dbtn.querySelector('canvas').getContext('2d'), dmap);
+  dbtn.onclick = () => startGame(dmap, dseed, true);
   overlay.classList.add('show');
 }
 
@@ -281,9 +321,10 @@ function drawThumb(c, m) {
   render(c, new Game(m), {}, 0.5);
 }
 
-function startGame(map) {
+function startGame(map, seed = 0, daily = false) {
   Sfx.init();
-  game = new Game(map);
+  game = new Game(map, seed);
+  game.daily = !!daily;
   running = true; ended = false; paused = false; acc = 0;
   ui.selected = null; setBuild(null);
   $('#btnPause').textContent = '일시정지';
@@ -292,12 +333,12 @@ function startGame(map) {
 
 function showEnd() {
   const won = game.state === 'won';
-  saveBest(game.map.id, clearedWaves());
+  saveBest(game.daily ? 'daily:' + game.seed : game.map.id, clearedWaves());
   const mvp = [...game.towers].sort((a, b) => b.dealt - a.dealt)[0];
   const mvpName = mvp && (mvp.branch != null ? mvp.def.branches[mvp.branch].name : mvp.def.name);
   overlay.innerHTML = `<div class="modal">
     <h2 class="${won ? 'win' : 'lose'}">${won ? '방어 성공' : '코어 파괴됨'}</h2>
-    <p>${game.map.name} · ${won ? `${TOTAL_WAVES}개 웨이브를 모두 막아냈습니다` : `웨이브 ${game.wave}에서 무너졌습니다`}</p>
+    <p>${game.daily ? `일일 챌린지 · ${dailyLabel(game.seed)} · ${game.map.name}` : game.map.name} · ${won ? `${TOTAL_WAVES}개 웨이브를 모두 막아냈습니다` : `웨이브 ${game.wave}에서 무너졌습니다`}</p>
     <div class="results">
       <div><b>${clearedWaves()}</b><span>클리어한 웨이브</span></div>
       <div><b>${game.kills}</b><span>처치</span></div>
@@ -311,7 +352,7 @@ function showEnd() {
     </div></div>`;
   overlay.querySelector('.actions').onclick = ev => {
     const act = ev.target.closest('button')?.dataset.act;
-    if (act === 'retry') startGame(game.map);
+    if (act === 'retry') startGame(game.map, game.seed, game.daily);
     else if (act === 'menu') showMenu();
     else if (act === 'endless') {
       game.endless = true; game.state = 'build'; game.countdown = 10;

@@ -6,7 +6,8 @@ const CELL = 40, COLS = 24, ROWS = 14;
 const W = COLS * CELL, H = ROWS * CELL;
 const TOTAL_WAVES = 30;
 const START_GOLD = 220, START_LIVES = 20, SELL_RATIO = 0.7;
-const INTEREST = 0.05, INTEREST_CAP = 40; // 웨이브 클리어 시 보유 골드의 5% 이자 (최대 50)
+const INTEREST = 0.05, INTEREST_CAP = 40; // 웨이브 클리어 시 보유 골드의 5% 이자 (최대 40)
+const SHIELD_REGEN_DELAY = 2.5; // 실드는 이 시간(초) 동안 피해가 없어야 재생한다
 const SCENE_SPRITES = {
   core: 'assets/battlefield/core.png',
   spawn: 'assets/battlefield/enemy-spawn.png',
@@ -80,7 +81,7 @@ const TOWERS = {
       { cost: 140, dmg: 170, range: 290, rate: 2.40 },
     ],
     branches: [
-      { name: '처형자', desc: '맞은 뒤 체력 25% 미만이 된 적은 즉사. (보스 제외)', cost: 300, dmg: 280, range: 330, rate: 2.20, execute: 0.25,
+      { name: '처형자', desc: '맞은 뒤 체력 20% 미만이 된 적은 즉사. (보스 제외)', cost: 300, dmg: 280, range: 330, rate: 2.20, execute: 0.20,
         sprite: { src: 'assets/towers/rail-executioner.png', pivot: [0.34, 0.5], muzzle: 23 } },
       { name: '가우스', desc: '장전 시간을 크게 줄인 연사형 레일건.', cost: 300, dmg: 105, range: 300, rate: 0.95,
         sprite: { src: 'assets/towers/rail-gauss.png', pivot: [0.41, 0.5], muzzle: 17 } },
@@ -128,17 +129,27 @@ const TOWERS = {
 };
 
 // cost: 웨이브 예산에서 차지하는 값 / gap: 같은 그룹 내 출현 간격(초)
-// shield: 최대 체력 대비 실드 비율 (2초간 피해가 없으면 재생) / split: 죽을 때 스웜 생성 수
+// shield: 최대 체력 대비 실드 비율 (SHIELD_REGEN_DELAY초간 피해가 없으면 재생) / split: 죽을 때 스웜 생성 수
+// tip: 웨이브 미리보기에서 적에 마우스를 올리면 나오는 상성 한 줄 안내
 const ENEMIES = {
-  grunt:    { name: '그런트',   hp: 30,  speed: 50,  reward: 5,  r: 9,  color: '#ff5d73', shape: 'circle',  unlock: 1,  cost: 6,   gap: 0.70 },
-  runner:   { name: '러너',     hp: 18,  speed: 100, reward: 5,  r: 7,  color: '#ffd166', shape: 'tri',     unlock: 2,  cost: 6,   gap: 0.45 },
-  swarm:    { name: '스웜',     hp: 8,   speed: 72,  reward: 2,  r: 5,  color: '#c8b6ff', shape: 'dot',     unlock: 4,  cost: 2.4, gap: 0.18 },
-  tank:     { name: '탱크',     hp: 150, speed: 30,  reward: 15, r: 12, color: '#fb8500', shape: 'square',  unlock: 5,  cost: 20,  gap: 1.50, armor: 4 },
-  flyer:    { name: '플라이어', hp: 26,  speed: 62,  reward: 7,  r: 8,  color: '#06d6a0', shape: 'wing',    unlock: 7,  cost: 9,   gap: 0.60, flying: true, icon: 'assets/icons/flyer.png' },
-  healer:   { name: '힐러',     hp: 60,  speed: 45,  reward: 12, r: 9,  color: '#80ed99', shape: 'plus',    unlock: 9,  cost: 16,  gap: 1.20, heal: 6, icon: 'assets/icons/healer.png' },
-  shield:   { name: '실드',     hp: 45,  speed: 52,  reward: 9,  r: 9,  color: '#48cae4', shape: 'diamond', unlock: 11, cost: 12,  gap: 0.80, shield: 0.8, icon: 'assets/icons/shield.png' },
-  splitter: { name: '분열체',   hp: 70,  speed: 40,  reward: 6,  r: 11, color: '#e76f51', shape: 'blob',    unlock: 13, cost: 14,  gap: 1.00, split: 3 },
-  boss:     { name: '보스',     hp: 750, speed: 22, reward: 150, r: 18, color: '#ff006e', shape: 'hex',    unlock: 99, armor: 3, leak: 5, icon: 'assets/icons/boss.png' },
+  grunt:    { name: '그런트',   hp: 30,  speed: 50,  reward: 5,  r: 9,  color: '#ff5d73', shape: 'circle',  unlock: 1,  cost: 6,   gap: 0.70,
+              tip: '기본 적. 모든 화력으로 대응할 수 있습니다.' },
+  runner:   { name: '러너',     hp: 18,  speed: 100, reward: 5,  r: 7,  color: '#ffd166', shape: 'tri',     unlock: 2,  cost: 6,   gap: 0.45,
+              tip: '이동이 빠릅니다. 프로스트 감속으로 묶으면 미로에서 오래 담글 수 있습니다.' },
+  swarm:    { name: '스웜',     hp: 8,   speed: 72,  reward: 2,  r: 5,  color: '#c8b6ff', shape: 'dot',     unlock: 4,  cost: 2.4, gap: 0.18,
+              tip: '값싸고 대규모로 몰려옵니다. 모르타르·테슬라 같은 범위 공격이 효율적입니다.' },
+  tank:     { name: '탱크',     hp: 150, speed: 30,  reward: 15, r: 12, color: '#fb8500', shape: 'square',  unlock: 5,  cost: 20,  gap: 1.50, armor: 4,
+              tip: '방어력이 높아 약한 공격이 크게 깎입니다. 방어 무시(레일건·네이팜·프로스트·궤도 폭격)나 테슬라 과부하·절대영도로 약점을 여세요.' },
+  flyer:    { name: '플라이어', hp: 26,  speed: 62,  reward: 7,  r: 8,  color: '#06d6a0', shape: 'wing',    unlock: 7,  cost: 9,   gap: 0.60, flying: true, icon: 'assets/icons/flyer.png',
+              tip: '미로를 무시하고 코어로 직선 비행합니다. 펄스·레이저·미사일 같은 대공 화력이 꼭 필요하고 미사일은 2배 피해를 줍니다.' },
+  healer:   { name: '힐러',     hp: 60,  speed: 45,  reward: 12, r: 9,  color: '#80ed99', shape: 'plus',    unlock: 9,  cost: 16,  gap: 1.20, heal: 6, icon: 'assets/icons/healer.png',
+              tip: '주변 아군을 계속 회복합니다. 경로 앞쪽에서 먼저 처치하고, 범위 공격으로 함께 노리세요.' },
+  shield:   { name: '실드',     hp: 45,  speed: 52,  reward: 9,  r: 9,  color: '#48cae4', shape: 'diamond', unlock: 11, cost: 12,  gap: 0.80, shield: 0.8, icon: 'assets/icons/shield.png',
+              tip: '2.5초간 피해를 받지 않으면 실드가 재생됩니다. 레이저·네이팜 같은 지속 화력이나 EMP(미사일 특화)로 실드를 벗기세요.' },
+  splitter: { name: '분열체',   hp: 70,  speed: 40,  reward: 6,  r: 11, color: '#e76f51', shape: 'blob',    unlock: 13, cost: 14,  gap: 1.00, split: 3,
+              tip: '죽으면 스웜 3마리로 갈라집니다. 분열 지점 근처에 범위 화력을 배치하세요.' },
+  boss:     { name: '보스',     hp: 750, speed: 22, reward: 150, r: 18, color: '#ff006e', shape: 'hex',    unlock: 99, armor: 3, leak: 5, icon: 'assets/icons/boss.png',
+              tip: '체력·방어가 매우 높고 코어를 통과하면 내구도 5를 깎습니다. 집속광·궤도 폭격 같은 방어 무시 화력이나 과부하·절대영도로 상대하세요.' },
 };
 
 // rocks: [열, 행, 너비, 높이] — 지나갈 수도, 지을 수도 없는 지형 / hp: 맵별 적 체력 배율
@@ -183,6 +194,17 @@ const SKILLS = {
 // 웨이브가 진행될수록 체력이 2차 곡선으로 증가
 const hpMult = w => 1 + 0.25 * (w - 1) + 0.03 * (w - 1) * (w - 1);
 
+// 일일 챌린지: UTC 기준 날짜로 시드를 정한다. 같은 날이면 누구에게나 같은 구성.
+// seed는 0이 표준(항상 같은) 웨이브. 0이 아닌 시드는 구성이 달라진다.
+function dailySeed(d = new Date()) {
+  return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+}
+const dailyMapIndex = seed => seed % MAPS.length;
+function dailyLabel(seed) {
+  const s = String(seed);
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)} (UTC)`;
+}
+
 // 시드 고정 난수 — 같은 웨이브 번호는 항상 같은 구성 (재현 가능한 밸런스)
 function mulberry32(a) {
   return () => {
@@ -194,8 +216,9 @@ function mulberry32(a) {
 }
 
 // 예산 기반 절차적 웨이브 생성 → { groups: [{type, count, gap, delay}], mod }
-function genWave(w) {
-  const rnd = mulberry32(w * 7919 + 13);
+// seed: 일일 챌린지 등에서 구성을 바꾸는 값. 0이면 표준 구성.
+function genWave(w, seed = 0) {
+  const rnd = mulberry32(w * 7919 + 13 + Math.imul(seed, 2654435761));
   const pool = Object.keys(ENEMIES).filter(k => ENEMIES[k].unlock <= w);
   const budget = 40 + w * 22 + w * w * 1.2;
   const n = w < 3 ? 1 : w < 8 ? 2 : 3;
@@ -208,6 +231,8 @@ function genWave(w) {
   }
 
   // 새 적이 처음 나오는 웨이브와 보스 웨이브에는 변이를 붙이지 않는다
+  // (주의: 표준 30웨이브의 구성은 이미 출시된 경험이다 — 변이 재배치는 봇 경제 궤적 전체를 흔들므로
+  //  힐러·실드 겹침 완화는 구성 불변인 SHIELD_REGEN_DELAY로만 한다)
   const keys = Object.keys(MODS), roll = rnd();
   const mod = w > TOTAL_WAVES || (w >= 8 && w % 10 !== 0 && !intro && roll < 0.6)
     ? keys[Math.floor(rnd() * keys.length)] : null;
