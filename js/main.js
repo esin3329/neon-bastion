@@ -157,7 +157,7 @@ $('#btnWave').onclick = () => { Sfx.init(); game.startWave(); };
 $('#btnSpeed').onclick = cycleSpeed;
 $('#btnPause').onclick = togglePause;
 $('#btnMute').onclick = toggleMute;
-$('#btnMenu').onclick = () => { saveBest(game.map.id, clearedWaves()); showMenu(); };
+$('#btnMenu').onclick = () => { saveBest(game.daily ? 'daily:' + game.seed : game.map.id, clearedWaves()); showMenu(); };
 
 function cycleSpeed() { speed = speed === 1 ? 2 : speed === 2 ? 4 : 1; $('#btnSpeed').textContent = `×${speed}`; }
 function togglePause() { if (!running || ended) return; paused = !paused; $('#btnPause').textContent = paused ? '계속하기' : '일시정지'; }
@@ -193,8 +193,9 @@ $('#preview').addEventListener('mouseout', ev => {
 // ── HUD 동기화: 값이 바뀐 요소만 DOM 갱신 ─────────────────────
 const cache = {};
 function set(id, value, prop = 'textContent') {
-  if (cache[id + prop] === value) return;
+  if (cache[id + prop] === value) return false;
   cache[id + prop] = value; $(id)[prop] = value;
+  return true;
 }
 
 function syncUI() {
@@ -209,14 +210,15 @@ function syncUI() {
     ? `지금 호출 +${Math.ceil(game.countdown) * 2}G <kbd>N</kbd>` : '웨이브 시작 <kbd>N</kbd>', 'innerHTML');
 
   // 다음(또는 현재) 웨이브 구성과 변이 미리보기
+  // 미리보기가 갱신되면 hover 중이던 적 표식이 통째로 교체되므로 툴팁을 닫는다
   const wv = genWave(inWave ? game.wave : game.wave + 1, game.seed), mod = wv.mod && MODS[wv.mod];
-  set('#preview', (inWave ? '현재' : '다음') +
+  if (set('#preview', (inWave ? '현재' : '다음') +
     (mod ? ` <span class="mod" style="--c:${mod.color}" title="${mod.desc}">${mod.name} · ${mod.desc}</span>` : '') +
     wv.groups.map(({ type, count }) => {
       const { name, color, icon } = ENEMIES[type];
       const marker = enemyIcons[type]?.naturalWidth ? `<img src="${icon}" alt="">` : `<i class="dot" style="background:${color}"></i>`;
       return `<span class="en" data-type="${type}">${marker}${name}×${count}</span>`;
-    }).join(''), 'innerHTML');
+    }).join(''), 'innerHTML')) entip.classList.remove('show');
 
   for (const c of shop.querySelectorAll('.card')) {
     if (c.dataset.type) { c.classList.toggle('poor', game.gold < TOWERS[c.dataset.type].levels[0].cost); continue; }
