@@ -386,7 +386,7 @@ buildShop();
 fit();
 showMenu();
 Promise.allSettled(Object.values(sceneSprites).map(image => image.decode())).then(() => {
-  overlay.querySelectorAll('.map').forEach(button =>
+  overlay.querySelectorAll('.map[data-map]').forEach(button =>
     drawThumb(button.querySelector('canvas').getContext('2d'), MAPS[button.dataset.map]));
 });
 requestAnimationFrame(frame);
