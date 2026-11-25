@@ -145,7 +145,7 @@ function flyMissiles(game) {
   assert.ok(e.hp < e.maxHp, '실드가 아니라 체력이 깎인다');
   e.stunT = 10;
   game.updateEnemy(e, 2.5);
-  assert.equal(e.shield, 0, '일반 피격의 2초가 지나도 재생하지 않는다');
+  assert.equal(e.shield, 0, '일반 피격의 2.5초가 지나도 재생하지 않는다');
   game.updateEnemy(e, 1);
   assert.ok(e.shield > 0, '3초 뒤에는 다시 재생한다');
 }

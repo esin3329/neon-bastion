@@ -3,7 +3,7 @@
 //  효과음은 WebAudio로 실시간 생성한다.
 // ─────────────────────────────────────────────────────────────
 class Effects {
-  constructor() { this.parts = []; this.texts = []; this.beams = []; this.rings = []; this.shake = 0; }
+  constructor() { this.parts = []; this.texts = []; this.beams = []; this.rings = []; this.shake = 0; this.banner = null; }
 
   burst(x, y, color, n = 10, speed = 120) {
     if (this.parts.length > 700) return; // 상한으로 프레임 보호
@@ -16,6 +16,7 @@ class Effects {
   text(x, y, str, color) { this.texts.push({ x, y, str, color, life: 0.9, max: 0.9 }); }
   beam(pts, color, width = 2, life = 0.15) { this.beams.push({ pts, color, width, life, max: life }); }
   ring(x, y, r, color, life = 0.35, sprite = null) { this.rings.push({ x, y, r, color, life, max: life, sprite }); }
+  showBanner(title, sub = '', color = '#4cc9f0', life = 2.2) { this.banner = { title, sub, color, life, max: life }; }
 
   // 두 점 사이를 지그재그로 잇는 번개
   bolt(x1, y1, x2, y2, color) {
@@ -37,6 +38,7 @@ class Effects {
     this.texts = this.texts.filter(t => t.life > 0);
     this.beams = this.beams.filter(b => b.life > 0);
     this.rings = this.rings.filter(r => r.life > 0);
+    if (this.banner) { this.banner.life -= dt; if (this.banner.life <= 0) this.banner = null; }
     this.shake *= 0.88;
     if (this.shake < 0.1) this.shake = 0;
   }
@@ -46,9 +48,11 @@ class Effects {
 const Sfx = {
   ac: null, muted: false, last: {},
 
-  init() { // 브라우저 정책상 첫 사용자 입력 이후에만 생성 가능
-    if (this.ac) return;
-    try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* 소리 없이 진행 */ }
+  init() { // 브라우저 정책상 첫 사용자 입력 이후에만 생성·재개 가능
+    if (!this.ac) {
+      try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* 소리 없이 진행 */ }
+    }
+    if (this.ac?.state === 'suspended') this.ac.resume().catch(() => {});
   },
 
   tone(freq, dur, type = 'square', vol = 0.05, slide = 0, delay = 0) {

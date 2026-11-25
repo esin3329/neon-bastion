@@ -7,8 +7,9 @@ const board = $('#board'), panel = $('#panel'), overlay = $('#overlay'), shop = 
 const STEP = 1 / 60;
 
 let game = new Game(MAPS[0]); // 메뉴 뒤 배경으로도 쓰인다
-let running = false, paused = false, ended = false, speed = 1, scale = 1, acc = 0, last = performance.now();
-const ui = { build: null, skill: null, hover: null, mouse: null, valid: false, selected: null, hoverKey: '' };
+let running = false, paused = false, ended = false, speed = 1, scale = 1, acc = 0, last = performance.now(), endTimer = 0;
+const ui = { build: null, skill: null, hover: null, mouse: null, valid: false, selected: null, hoverKey: '', paused: false, previewPaths: null, previewDelta: 0 };
+const hasActiveRun = () => game.state !== 'won' && game.state !== 'lost' && (game.wave > 0 || game.towers.length > 0);
 
 const fmt = n => n >= 10000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n));
 
@@ -32,6 +33,7 @@ function fit() {
   scale = cv.width / W;
 }
 window.addEventListener('resize', fit);
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(fit).observe($('#stage'));
 
 // ── 상점 (스킬 2 + 타워 8) ───────────────────────────────────
 const tip = Object.assign(document.createElement('div'), { id: 'tip' });
@@ -70,13 +72,13 @@ function showDefaultTip() {
 }
 
 function setBuild(type) {
-  ui.build = type; ui.skill = null; ui.selected = null; ui.hoverKey = '';
+  ui.build = type; ui.skill = null; ui.selected = null; ui.hoverKey = ''; ui.previewPaths = null; ui.previewDelta = 0;
   shop.querySelectorAll('.card').forEach(c => c.classList.toggle('on', !!type && c.dataset.type === type));
   showDefaultTip();
 }
 
 function triggerSkill(id) {
-  if (!running || ended || game.cds[id] > 0) return;
+  if (!running || ended || paused || game.cds[id] > 0) return;
   Sfx.init();
   if (id === 'strike') { // 위치 지정이 필요한 스킬은 조준 모드로
     const on = ui.skill !== 'strike';
@@ -97,13 +99,14 @@ function cellAt(ev) {
   return inb(c, r) ? [c, r] : null;
 }
 cv.addEventListener('pointermove', ev => { ui.hover = cellAt(ev); ui.mouse = pointerAt(ev); });
-cv.addEventListener('pointerleave', () => { ui.hover = null; ui.mouse = null; });
+cv.addEventListener('pointerleave', () => { ui.hover = null; ui.mouse = null; ui.previewPaths = null; ui.previewDelta = 0; });
 cv.addEventListener('contextmenu', ev => ev.preventDefault());
 cv.addEventListener('pointerdown', ev => {
   if (!running || ended) return;
   Sfx.init();
   if (ev.button === 2) { setBuild(null); return; }
   if (ui.skill === 'strike') {
+    if (paused) return;
     const [x, y] = ui.mouse = pointerAt(ev);
     if (game.useSkill('strike', x, y)) setBuild(null);
     return;
@@ -122,6 +125,7 @@ cv.addEventListener('pointerdown', ev => {
 });
 
 panel.addEventListener('click', ev => {
+  if (!running || ended) return;
   const btn = ev.target.closest('button'), t = ui.selected;
   if (!btn || !t) return;
   const act = btn.dataset.act;
@@ -135,9 +139,25 @@ function cycleMode(t) {
   t.mode = keys[(keys.indexOf(t.mode) + 1) % keys.length];
 }
 
+// 한글 IME 상태에서도 물리 키(code)로 단축키가 동작하도록 정규화
+function hotkey(ev) {
+  const k = ev.key.toLowerCase();
+  if (/^[a-z0-9 ]$/.test(k) || k === 'escape') return k;
+  if (/^Key[A-Z]$/.test(ev.code)) return ev.code[3].toLowerCase();
+  if (/^Digit[0-9]$/.test(ev.code)) return ev.code[5];
+  if (ev.code === 'Space') return ' ';
+  if (ev.code === 'Escape') return 'escape';
+  return k;
+}
+
 window.addEventListener('keydown', ev => {
-  if (!running || ended || ev.repeat) return;
-  const k = ev.key.toLowerCase(), t = ui.selected;
+  if (ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (!running && !ended && overlay.classList.contains('show') && hasActiveRun() && hotkey(ev) === 'escape') {
+    resumeGame();
+    return;
+  }
+  if (!running || ended) return;
+  const k = hotkey(ev), t = ui.selected;
   const type = Object.keys(TOWERS).find(n => TOWERS[n].key === k);
   const skill = Object.keys(SKILLS).find(n => SKILLS[n].key === k);
   if (type) setBuild(ui.build === type ? null : type);
@@ -145,28 +165,36 @@ window.addEventListener('keydown', ev => {
   else if (k === 'escape') setBuild(null);
   else if (k === ' ') { ev.preventDefault(); togglePause(); }
   else if (k === 'f') cycleSpeed();
-  else if (k === 'n') game.startWave();
+  else if (k === 'n' && !paused) game.startWave();
   else if (k === 'm') toggleMute();
   else if (k === 'u' && t && t.level === 0) game.upgrade(t);
   else if ((k === 'a' || k === 'b') && t && t.level === 1) game.upgrade(t, k === 'a' ? 0 : 1);
-  else if (k === 't' && t) cycleMode(t);
+  else if (k === 't' && t && t.type !== 'frost' && !t.def.support) cycleMode(t);
   else if (k === 'x' && t) { game.sell(t); ui.selected = null; }
 });
 
-$('#btnWave').onclick = () => { Sfx.init(); game.startWave(); };
+$('#btnWave').onclick = () => { if (!running || ended || paused) return; Sfx.init(); game.startWave(); };
 $('#btnSpeed').onclick = cycleSpeed;
 $('#btnPause').onclick = togglePause;
 $('#btnMute').onclick = toggleMute;
 $('#btnMenu').onclick = () => { saveBest(game.daily ? 'daily:' + game.seed : game.map.id, clearedWaves()); showMenu(); };
 
 function cycleSpeed() { speed = speed === 1 ? 2 : speed === 2 ? 4 : 1; $('#btnSpeed').textContent = `×${speed}`; }
-function togglePause() { if (!running || ended) return; paused = !paused; $('#btnPause').textContent = paused ? '계속하기' : '일시정지'; }
+function togglePause() {
+  if (!running || ended) return;
+  paused = !paused;
+  if (paused && ui.skill) setBuild(null);
+  $('#btnPause').textContent = paused ? '계속하기' : '일시정지';
+}
 function toggleMute() {
   Sfx.muted = !Sfx.muted;
   $('#btnMute').textContent = Sfx.muted ? '소리 끔' : '소리 켬';
   try { localStorage.setItem(MUTE_KEY, Sfx.muted ? '1' : '0'); } catch (e) { /* 저장 불가 환경 */ }
 }
 if (loadMuted()) { Sfx.muted = true; $('#btnMute').textContent = '소리 끔'; }
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && running && !ended && !paused) togglePause();
+});
 
 // ── 상성 툴팁: 미리보기의 적에 마우스를 올리면 약점 안내 ─────
 const entip = Object.assign(document.createElement('div'), { id: 'entip' });
@@ -181,6 +209,7 @@ function moveEntip(ev) {
 $('#preview').addEventListener('mouseover', ev => {
   const en = ev.target.closest('.en'), def = en && ENEMIES[en.dataset.type];
   if (!def || !def.tip) return;
+  entip.dataset.type = en.dataset.type;
   entip.innerHTML = `<b style="color:${def.color}">${def.name}</b> — ${def.tip}`;
   entip.classList.add('show');
   moveEntip(ev);
@@ -188,6 +217,20 @@ $('#preview').addEventListener('mouseover', ev => {
 $('#preview').addEventListener('mousemove', ev => { if (entip.classList.contains('show')) moveEntip(ev); });
 $('#preview').addEventListener('mouseout', ev => {
   if (!ev.relatedTarget || !ev.relatedTarget.closest?.('.en')) entip.classList.remove('show');
+});
+$('#preview').addEventListener('click', ev => {
+  const en = ev.target.closest('.en'), def = en && ENEMIES[en.dataset.type];
+  if (!def || !def.tip) return;
+  if (entip.classList.contains('show') && entip.dataset.type === en.dataset.type) entip.classList.remove('show');
+  else {
+    entip.dataset.type = en.dataset.type;
+    entip.innerHTML = `<b style="color:${def.color}">${def.name}</b> — ${def.tip}`;
+    entip.classList.add('show');
+    moveEntip(ev);
+  }
+});
+document.addEventListener('click', ev => {
+  if (entip.classList.contains('show') && !ev.target.closest?.('#preview')) entip.classList.remove('show');
 });
 
 // ── HUD 동기화: 값이 바뀐 요소만 DOM 갱신 ─────────────────────
@@ -205,9 +248,9 @@ function syncUI() {
 
   const inWave = game.state === 'wave';
   set('#dailyTag', !game.daily, 'hidden');
-  set('#btnWave', !running || inWave || ended, 'disabled');
+  set('#btnWave', !running || inWave || ended || paused, 'disabled');
   set('#btnWave', inWave ? '전투 중…' : game.countdown > 0
-    ? `지금 호출 +${Math.ceil(game.countdown) * 2}G <kbd>N</kbd>` : '웨이브 시작 <kbd>N</kbd>', 'innerHTML');
+    ? `지금 호출 (${Math.ceil(game.countdown)}초 · +${Math.ceil(game.countdown) * 2}G) <kbd>N</kbd>` : '웨이브 시작 <kbd>N</kbd>', 'innerHTML');
 
   // 다음(또는 현재) 웨이브 구성과 변이 미리보기
   // 미리보기가 갱신되면 hover 중이던 적 표식이 통째로 교체되므로 툴팁을 닫는다
@@ -227,10 +270,14 @@ function syncUI() {
     c.style.setProperty('--p', left / SKILLS[id].cd);
   }
 
-  // 배치 가능 여부는 커서 칸이나 지형이 바뀔 때만 재계산 (BFS 비용 절약)
+  // 배치 가능 여부와 우회 경로는 커서 칸이나 지형이 바뀔 때만 재계산 (BFS 비용 절약)
   if (ui.build && ui.hover) {
     const key = ui.hover.join() + ':' + game.version + ':' + (game.enemies.length ? Math.floor(game.time * 4) : 0);
-    if (key !== ui.hoverKey) { ui.hoverKey = key; ui.valid = game.canBuild(ui.hover[0], ui.hover[1]); }
+    if (key !== ui.hoverKey) {
+      ui.hoverKey = key;
+      const prev = game.previewPaths(ui.hover[0], ui.hover[1]);
+      ui.valid = prev.valid; ui.previewPaths = prev.paths; ui.previewDelta = prev.delta;
+    }
   }
 
   syncPanel();
@@ -257,7 +304,14 @@ function syncPanel() {
     if (s.air) rows.push(row('공중 피해', '×' + s.air, n && '×' + n.air));
     if (s.slow) rows.push(row('감속', pct(s.slow), n && pct(n.slow), '%'));
     if (s.chain) rows.push(row('연쇄', s.chain, n?.chain, '회'));
-    if (t.buff) rows.push(row('증폭 받음', `+${pct(t.buff)}%` + (t.haste ? ` · 연사 +${pct(t.haste)}%` : ''), null));
+    if (s.multi) rows.push(row('동시 타격', s.multi, n?.multi, '대상'));
+    if (s.cdmg) rows.push(row('자탄 피해', s.cdmg, null));
+    if (s.burn) rows.push(row('초당 화상', s.burn, null));
+    if (s.freeze) rows.push(row('빙결', `${s.freeze}초 / ${s.every}초`, null));
+    if (s.shred) rows.push(row('방어 감소', '-' + s.shred, null));
+    if (s.execute) rows.push(row('즉사 기준', `체력 ${pct(s.execute)}% 미만`, null));
+    if (s.emp) rows.push(row('실드 차단', s.emp, null, '초'));
+    if (t.buff) rows.push(row('증폭 받음', `+${pct(t.buff)}%` + (t.haste && s.rate ? ` · 연사 +${pct(t.haste)}%` : ''), null));
     rows.push('<tr><td>누적 피해</td><td class="dealt"></td></tr>');
   }
 
@@ -284,30 +338,45 @@ function syncPanel() {
 }
 
 // ── 메뉴·결과 화면 ──────────────────────────────────────────
+function resumeGame() {
+  if (!hasActiveRun()) return;
+  Sfx.init();
+  running = true; paused = false; acc = 0; last = performance.now();
+  $('#btnPause').textContent = '일시정지';
+  overlay.classList.remove('show');
+}
+
 function showMenu() {
+  clearTimeout(endTimer); endTimer = 0; entip.classList.remove('show');
   running = false; ended = false; paused = false; setBuild(null);
   const best = loadBest();
   const dseed = dailySeed(), dmap = MAPS[dailyMapIndex(dseed)], dkey = 'daily:' + dseed;
+  const active = hasActiveRun();
+  const mapBadge = b => b >= TOTAL_WAVES ? `★ 클리어 · 최고 웨이브 ${b}` : b ? `최고 기록: 웨이브 ${b}` : '기록 없음';
+  const dailyBadge = b => b >= TOTAL_WAVES ? `★ 오늘 클리어 · 웨이브 ${b}` : b ? `오늘의 기록: 웨이브 ${b}` : '오늘 첫 도전';
   overlay.innerHTML = `<div class="modal">
     <h1>NEON<b>BASTION</b></h1>
     <p>타워로 미로를 설계해 ${TOTAL_WAVES}번의 웨이브로부터 코어를 지켜라</p>
+    ${active ? `<div class="resume-bar"><button class="primary resume" data-resume="1">진행 중인 게임 계속하기 · ${game.daily ? '일일 챌린지' : game.map.name} (웨이브 ${game.wave} · 내구도 ${Math.max(0, game.lives)})</button></div>` : ''}
     <div class="maps">${MAPS.map((m, i) => `
       <button class="map" data-map="${i}">
         <canvas width="480" height="280"></canvas>
         <div class="t">${m.name}<em>${m.diff}</em></div>
         <div class="d">${m.desc}</div>
-        <div class="b">${best[m.id] ? `최고 기록: 웨이브 ${best[m.id]}` : '기록 없음'}</div>
+        <div class="b">${mapBadge(best[m.id])}</div>
       </button>`).join('')}
       <button class="map daily" data-daily="1">
         <canvas width="480" height="280"></canvas>
         <div class="t">일일 챌린지<em>${dailyLabel(dseed)}</em></div>
         <div class="d">오늘의 맵: ${dmap.name} — 같은 날엔 누구나 같은 구성으로 플레이합니다.</div>
-        <div class="b">${best[dkey] ? `오늘의 기록: 웨이브 ${best[dkey]}` : '오늘 첫 도전'}</div>
+        <div class="b">${dailyBadge(best[dkey])}</div>
       </button></div>
     <div class="help">
       <kbd>1</kbd>–<kbd>${Object.keys(TOWERS).length}</kbd> 타워 선택 · 클릭으로 배치 · <kbd>U</kbd> 강화 · <kbd>A</kbd>/<kbd>B</kbd> 3레벨 특화 · <kbd>X</kbd> 판매 · <kbd>T</kbd> 조준 변경<br>
       <kbd>Q</kbd> 궤도 폭격 · <kbd>E</kbd> 시간 정지 · <kbd>N</kbd> 웨이브 호출 · <kbd>F</kbd> 배속 · <kbd>Space</kbd> 일시정지 · <kbd>M</kbd> 소리
     </div></div>`;
+  const rbtn = overlay.querySelector('[data-resume]');
+  if (rbtn) rbtn.onclick = resumeGame;
   overlay.querySelectorAll('.map[data-map]').forEach(b => {
     const m = MAPS[b.dataset.map];
     drawThumb(b.querySelector('canvas').getContext('2d'), m);
@@ -324,6 +393,7 @@ function drawThumb(c, m) {
 }
 
 function startGame(map, seed = 0, daily = false) {
+  clearTimeout(endTimer); endTimer = 0; entip.classList.remove('show');
   Sfx.init();
   game = new Game(map, seed);
   game.daily = !!daily;
@@ -333,7 +403,20 @@ function startGame(map, seed = 0, daily = false) {
   overlay.classList.remove('show');
 }
 
+function shareSummary() {
+  const mode = game.daily ? `일일 챌린지 ${dailyLabel(game.seed)} · ${game.map.name}` : game.map.name;
+  const result = game.state === 'won' ? `방어 성공 (${TOTAL_WAVES}W)` : `웨이브 ${game.wave} 도달 (클리어 ${clearedWaves()}W)`;
+  const mvp = [...game.towers].sort((a, b) => b.dealt - a.dealt)[0];
+  const mvpName = mvp && (mvp.branch != null ? mvp.def.branches[mvp.branch].name : mvp.def.name);
+  return [
+    `NEON BASTION — ${mode}`,
+    `${result} · 내구도 ${Math.max(0, game.lives)} · 처치 ${game.kills}` + (mvp ? ` · MVP ${mvpName}(${fmt(mvp.dealt)})` : ''),
+    'https://esin3329.github.io/neon-bastion/',
+  ].join('\n');
+}
+
 function showEnd() {
+  entip.classList.remove('show');
   const won = game.state === 'won';
   saveBest(game.daily ? 'daily:' + game.seed : game.map.id, clearedWaves());
   const mvp = [...game.towers].sort((a, b) => b.dealt - a.dealt)[0];
@@ -350,13 +433,18 @@ function showEnd() {
     <div class="actions">
       ${won ? '<button class="primary" data-act="endless">무한 모드로 계속</button>' : ''}
       <button class="${won ? '' : 'primary'}" data-act="retry">다시 도전</button>
+      <button data-act="share">결과 복사</button>
       <button data-act="menu">맵 선택</button>
     </div></div>`;
   overlay.querySelector('.actions').onclick = ev => {
-    const act = ev.target.closest('button')?.dataset.act;
+    const btn = ev.target.closest('button'), act = btn?.dataset.act;
     if (act === 'retry') startGame(game.map, game.seed, game.daily);
     else if (act === 'menu') showMenu();
-    else if (act === 'endless') {
+    else if (act === 'share') {
+      const done = label => { btn.textContent = label; setTimeout(() => { btn.textContent = '결과 복사'; }, 1500); };
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(shareSummary()).then(() => done('복사됨!'), () => done('복사 불가'));
+      else done('복사 불가');
+    } else if (act === 'endless') {
       game.endless = true; game.state = 'build'; game.countdown = 10;
       ended = false; overlay.classList.remove('show');
     }
@@ -374,19 +462,26 @@ function frame(now) {
     if (acc > STEP * 16) acc = 0; // 탭 복귀 등으로 밀린 시간은 버린다
     if (!ended && (game.state === 'won' || game.state === 'lost')) {
       ended = true; setBuild(null);
-      setTimeout(showEnd, 1100);
+      const finished = game;
+      endTimer = setTimeout(() => { endTimer = 0; if (running && game === finished) showEnd(); }, 1100);
     }
   }
+  ui.paused = paused;
   render(ctx, game, ui, scale);
   syncUI();
   requestAnimationFrame(frame);
 }
 
+function redrawMenuThumbs() {
+  const dmap = MAPS[dailyMapIndex(dailySeed())];
+  overlay.querySelectorAll('.map').forEach(button => {
+    const map = button.dataset.daily ? dmap : MAPS[button.dataset.map];
+    if (map) drawThumb(button.querySelector('canvas').getContext('2d'), map);
+  });
+}
+
 buildShop();
 fit();
 showMenu();
-Promise.allSettled(Object.values(sceneSprites).map(image => image.decode())).then(() => {
-  overlay.querySelectorAll('.map[data-map]').forEach(button =>
-    drawThumb(button.querySelector('canvas').getContext('2d'), MAPS[button.dataset.map]));
-});
+Promise.allSettled(Object.values(sceneSprites).map(image => image.decode())).then(redrawMenuThumbs);
 requestAnimationFrame(frame);

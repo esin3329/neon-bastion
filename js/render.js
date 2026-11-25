@@ -197,8 +197,8 @@ function drawEnemy(ctx, e, time) {
 }
 
 function render(ctx, game, ui, scale) {
-  const fx = game.fx, t = game.time;
-  ctx.setTransform(scale, 0, 0, scale, (Math.random() - 0.5) * fx.shake * scale, (Math.random() - 0.5) * fx.shake * scale);
+  const fx = game.fx, t = game.time, shake = ui.paused ? 0 : fx.shake;
+  ctx.setTransform(scale, 0, 0, scale, shake ? (Math.random() - 0.5) * shake * scale : 0, shake ? (Math.random() - 0.5) * shake * scale : 0);
 
   // 배경과 격자
   ctx.fillStyle = '#0a0e1a'; ctx.fillRect(-20, -20, W + 40, H + 40);
@@ -282,9 +282,9 @@ function render(ctx, game, ui, scale) {
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, TAU); ctx.fill();
   }
 
-  for (const e of game.enemies) if (!e.flying) drawEnemy(ctx, e, t);
+  for (const e of game.enemies) if (e.alive && !e.flying) drawEnemy(ctx, e, t);
   for (const tw of game.towers) drawTower(ctx, tw.type, tw.level, tw.x, tw.y, tw.ang, t, tw.flash, tw.branch);
-  for (const e of game.enemies) if (e.flying) drawEnemy(ctx, e, t);
+  for (const e of game.enemies) if (e.alive && e.flying) drawEnemy(ctx, e, t);
 
   // 발사체
   ctx.save();
@@ -366,12 +366,104 @@ function render(ctx, game, ui, scale) {
   // 건설 미리보기
   if (ui.build && ui.hover) {
     const [c, r] = ui.hover, def = TOWERS[ui.build], ok = ui.valid && game.gold >= def.levels[0].cost;
+    const onPath = game.paths.some(p => p.some(([pc, pr]) => pc === c && pr === r));
+    if (ui.valid && ui.previewPaths && (ui.previewDelta > 0 || onPath)) {
+      ctx.save();
+      ctx.setLineDash([6, 8]); ctx.lineDashOffset = -t * 45;
+      ctx.strokeStyle = 'rgba(76,201,240,0.78)'; ctx.lineWidth = 2.5;
+      for (const path of ui.previewPaths) {
+        ctx.beginPath();
+        path.forEach(([pc, pr], i) => ctx[i ? 'lineTo' : 'moveTo'](cx(pc), cx(pr)));
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    if (ui.valid) {
+      ctx.save();
+      ctx.setLineDash([3, 5]); ctx.lineDashOffset = -t * 20;
+      ctx.strokeStyle = 'rgba(128,255,219,0.75)'; ctx.lineWidth = 1.5;
+      if (ui.build === 'amp') {
+        const range = def.levels[0].range;
+        ctx.beginPath();
+        for (const o of game.towers) {
+          if (!o.def.support && Math.hypot(o.x - cx(c), o.y - cx(r)) <= range) {
+            ctx.moveTo(cx(c), cx(r)); ctx.lineTo(o.x, o.y);
+          }
+        }
+        ctx.stroke();
+      } else if (!def.support) {
+        ctx.beginPath();
+        for (const a of game.towers) {
+          if (a.def.support && Math.hypot(cx(c) - a.x, cx(r) - a.y) <= game.stats(a).range) {
+            ctx.moveTo(a.x, a.y); ctx.lineTo(cx(c), cx(r));
+          }
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
     rangeCircle(ctx, cx(c), cx(r), def.levels[0].range, ok ? def.color : '#ff5d73');
     ctx.globalAlpha = 0.6;
     drawTower(ctx, ui.build, 0, cx(c), cx(r), -Math.PI / 2, t, 0);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = ok ? '#80ed99' : '#ff5d73'; ctx.lineWidth = 2;
     rrect(ctx, c * CELL + 1, r * CELL + 1, CELL - 2, CELL - 2, 7); ctx.stroke();
+    if (ui.valid && ui.previewDelta > 0) {
+      const bx = Math.max(28, Math.min(W - 28, cx(c))), by = Math.max(20, r * CELL - 12);
+      ctx.save();
+      rrect(ctx, bx - 24, by - 10, 48, 20, 6);
+      ctx.fillStyle = 'rgba(10,14,26,0.92)'; ctx.fill();
+      ctx.strokeStyle = '#80ed99'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.textAlign = 'center'; ctx.font = '700 11px system-ui, sans-serif'; ctx.fillStyle = '#80ed99';
+      ctx.fillText(`+${ui.previewDelta}칸`, bx, by + 4);
+      ctx.restore();
+    }
+  }
+
+  // 웨이브·보스·변이 배너
+  if (fx.banner) {
+    const bn = fx.banner, elapsed = bn.max - bn.life;
+    const alpha = Math.min(1, elapsed / 0.25, bn.life / 0.45);
+    const bw = Math.min(W - 40, Math.max(250, Math.max(bn.title.length * 14, bn.sub.length * 11) + 48));
+    const bh = bn.sub ? 52 : 34, bx = (W - bw) / 2, by = 14;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    rrect(ctx, bx, by, bw, bh, 10);
+    ctx.fillStyle = 'rgba(10,14,26,0.9)'; ctx.fill();
+    ctx.strokeStyle = bn.color; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.font = '700 15px system-ui, sans-serif'; ctx.fillStyle = bn.color;
+    ctx.fillText(bn.title, W / 2, by + 22);
+    if (bn.sub) {
+      ctx.font = '12px system-ui, sans-serif'; ctx.fillStyle = '#dfe7ff';
+      ctx.fillText(bn.sub, W / 2, by + 40);
+    }
+    ctx.restore();
+  }
+
+  // 첫 시작 안내 배지
+  if (game.wave === 0 && game.state === 'build' && !game.towers.length && !ui.paused) {
+    const hw = 410, hx = (W - hw) / 2, hy = H - 38;
+    ctx.save();
+    rrect(ctx, hx, hy, hw, 28, 99);
+    ctx.fillStyle = 'rgba(10,14,26,0.85)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(76,201,240,0.45)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.font = '600 12px system-ui, sans-serif'; ctx.fillStyle = '#dfe7ff';
+    ctx.fillText('타워를 선택해 미로를 설계하고 [웨이브 시작]을 누르세요', W / 2, hy + 18);
+    ctx.restore();
+  }
+
+  // 일시정지 배지
+  if (ui.paused) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(6,9,19,0.22)'; ctx.fillRect(0, 0, W, H);
+    const pw = 230, px = (W - pw) / 2, py = 14;
+    rrect(ctx, px, py, pw, 34, 99);
+    ctx.fillStyle = 'rgba(14,20,36,0.94)'; ctx.fill();
+    ctx.strokeStyle = '#4cc9f0'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.font = '700 13px system-ui, sans-serif'; ctx.fillStyle = '#dfe7ff';
+    ctx.fillText('일시정지 · Space로 재개', W / 2, py + 22);
+    ctx.restore();
   }
 }
 
