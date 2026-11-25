@@ -14,9 +14,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: 타워·효과 규칙 검증
+      - name: 규칙·UI·효과 검증
         run: |
           node tools/check-towers.js
           node tools/check-effects.js
+          node tools/check-ui.js
       - name: 밸런스 회귀 검사 (3맵 밴드)
         run: node tools/balance.js check

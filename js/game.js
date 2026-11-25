@@ -55,11 +55,15 @@ class Game {
   refreshField() {
     this.dist = this.computeField();
     this.version++;
-    // 화면에 그릴 예상 경로 (입구별)
-    this.paths = this.spawns.map(([c, r]) => {
+    this.paths = this.tracePaths(this.dist);
+  }
+
+  // d(플로우 필드)를 따라 각 입구에서 코어까지의 최단 경로 추적
+  tracePaths(d) {
+    return this.spawns.map(([c, r]) => {
       const pts = [[c, r]];
       for (let g = 0; g < COLS * ROWS; g++) {
-        const n = this.nextCell(c, r);
+        const n = this.nextCell(c, r, d);
         if (!n) break;
         [c, r] = n; pts.push(n);
       }
@@ -68,13 +72,13 @@ class Game {
   }
 
   // 현재 칸에서 코어에 더 가까운 이웃 칸
-  nextCell(c, r) {
-    let best = null, bd = this.dist[idx(c, r)];
+  nextCell(c, r, d = this.dist) {
+    let best = null, bd = d[idx(c, r)];
     for (const [dx, dy] of DIRS) {
       const nc = c + dx, nr = r + dy;
       if (!inb(nc, nr)) continue;
-      const d = this.dist[idx(nc, nr)];
-      if (d >= 0 && d < bd) { bd = d; best = [nc, nr]; }
+      const nd = d[idx(nc, nr)];
+      if (nd >= 0 && nd < bd) { bd = nd; best = [nc, nr]; }
     }
     return best;
   }
@@ -83,17 +87,29 @@ class Game {
   towerAt(c, r) { return this.towers.find(t => t.c === c && t.r === r); }
 
   // 길을 완전히 막는 배치는 허용하지 않는다 (임시로 막아 보고 BFS로 검증)
-  canBuild(c, r) {
-    if (!inb(c, r) || this.grid[idx(c, r)]) return false;
-    if (c === this.core[0] && r === this.core[1]) return false;
-    if (this.spawns.some(s => s[0] === c && s[1] === r)) return false;
+  testBuildField(c, r) {
+    if (!inb(c, r) || this.grid[idx(c, r)]) return null;
+    if (c === this.core[0] && r === this.core[1]) return null;
+    if (this.spawns.some(s => s[0] === c && s[1] === r)) return null;
     const ground = this.enemies.filter(e => !e.flying);
-    if (ground.some(e => (e.c === c && e.r === r) || (e.tc === c && e.tr === r))) return false;
+    if (ground.some(e => (e.c === c && e.r === r) || (e.tc === c && e.tr === r))) return null;
     this.grid[idx(c, r)] = 2;
     const d = this.computeField();
     this.grid[idx(c, r)] = 0;
-    return this.spawns.every(s => d[idx(s[0], s[1])] >= 0) &&
-           ground.every(e => d[idx(e.tc, e.tr)] >= 0);
+    const ok = this.spawns.every(s => d[idx(s[0], s[1])] >= 0) &&
+               ground.every(e => d[idx(e.tc, e.tr)] >= 0);
+    return ok ? d : null;
+  }
+
+  canBuild(c, r) { return !!this.testBuildField(c, r); }
+
+  // 건설 미리보기용: 배치 가능 여부, 우회 경로, 전체 경로 길이 변화(+칸)를 반환
+  previewPaths(c, r) {
+    const d = this.testBuildField(c, r);
+    if (!d) return { valid: false, paths: null, delta: 0 };
+    const oldLen = this.spawns.reduce((s, [sc, sr]) => s + Math.max(0, this.dist[idx(sc, sr)]), 0);
+    const newLen = this.spawns.reduce((s, [sc, sr]) => s + Math.max(0, d[idx(sc, sr)]), 0);
+    return { valid: true, paths: this.tracePaths(d), delta: newLen - oldLen };
   }
 
   build(type, c, r) {
@@ -105,6 +121,7 @@ class Game {
     this.towers.push(t);
     this.grid[idx(c, r)] = 2;
     this.refreshField();
+    this.applyBuffs();
     this.fx.ring(t.x, t.y, 30, def.color);
     Sfx.play('build');
     return t;
@@ -149,6 +166,7 @@ class Game {
     this.gold -= cost; t.spent += cost;
     if (t.level === 1) t.branch = b;
     t.level++; t.cd = 0;
+    this.applyBuffs();
     this.fx.ring(t.x, t.y, 36, '#ffffff');
     this.fx.burst(t.x, t.y, t.def.color, 14, 90);
     if (t.branch != null) this.fx.text(t.x, t.y - 22, t.def.branches[t.branch].name, '#ffd166');
@@ -161,6 +179,7 @@ class Game {
     this.towers.splice(this.towers.indexOf(t), 1);
     this.grid[idx(t.c, t.r)] = 0;
     this.refreshField();
+    this.applyBuffs();
     this.fx.burst(t.x, t.y, '#ffd166', 12, 100);
     Sfx.play('sell');
   }
@@ -212,6 +231,14 @@ class Game {
     this.waveT = 0; this.countdown = -1;
     this.state = 'wave';
     if (this.mod) this.fx.text(this.coreX, this.coreY - 46, `변이: ${MODS[this.mod].name}`, MODS[this.mod].color);
+    if (this.wave % 10 === 0) {
+      this.fx.showBanner(`WAVE ${this.wave} · BOSS`,
+        this.mod ? `변이: ${MODS[this.mod].name} — ${MODS[this.mod].desc}` : '강력한 보스 출현! 화력을 집중하세요', '#ff006e', 2.6);
+    } else if (this.mod) {
+      this.fx.showBanner(`WAVE ${this.wave} · ${MODS[this.mod].name}`, MODS[this.mod].desc, MODS[this.mod].color, 2.2);
+    } else if (this.wave === 1) {
+      this.fx.showBanner('WAVE 1', '코어를 향해 적이 진격합니다', '#4cc9f0', 1.8);
+    }
     Sfx.play(this.wave % 10 === 0 ? 'boss' : 'wave');
   }
 
@@ -518,7 +545,7 @@ class Game {
         if (r > s.splash + e.def.r) continue;
         if (s.emp && e.maxShield) e.shield = 0;
         this.damage(e, s.dmg * (e.flying ? s.air : 1) * (1 - 0.5 * Math.min(1, r / s.splash)), s.src, false);
-        if (s.emp && e.maxShield) e.shieldT = Math.max(e.shieldT, s.emp); // damage()가 넣은 2초보다 길게 재생을 막는다
+        if (s.emp && e.maxShield) e.shieldT = Math.max(e.shieldT, s.emp); // damage()가 넣은 SHIELD_REGEN_DELAY(2.5초)보다 길게 재생을 막는다
       }
       this.fx.ring(s.tx, s.ty, s.splash, s.emp ? '#48cae4' : s.color, 0.3);
       this.fx.burst(s.tx, s.ty, s.color, 10, 130);

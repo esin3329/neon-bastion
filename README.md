@@ -85,6 +85,7 @@ tools/sim.js      헤드리스 시뮬레이션 공용 봇 (require 모듈)
 tools/balance.js  맵별 밸런스 진단 + 회귀 판정 (node tools/balance.js [mix|a|b|check])
 tools/compare-branches.js  16개 특화 동일 조건 비교 (node tools/compare-branches.js [mapId])
 tools/check-effects.js 회복·정지 효과 검증 (node tools/check-effects.js)
+tools/check-ui.js      메뉴·일시정지·단축키·오디오 등 UI 회귀 검증 (node tools/check-ui.js)
 tools/check-towers.js  레이저·증폭기·미사일 규칙, 집속탄 결정성, 테슬라 연쇄 거리, 미사일 누적 지출·판매 환급 검증 (node tools/check-towers.js)
 .github/workflows/ci.yml  풀 리퀘스트마다 검증 슈트 실행
 ```

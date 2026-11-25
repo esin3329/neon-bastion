@@ -149,7 +149,7 @@ const ENEMIES = {
   splitter: { name: '분열체',   hp: 70,  speed: 40,  reward: 6,  r: 11, color: '#e76f51', shape: 'blob',    unlock: 13, cost: 14,  gap: 1.00, split: 3,
               tip: '죽으면 스웜 3마리로 갈라집니다. 분열 지점 근처에 범위 화력을 배치하세요.' },
   boss:     { name: '보스',     hp: 750, speed: 22, reward: 150, r: 18, color: '#ff006e', shape: 'hex',    unlock: 99, armor: 3, leak: 5, icon: 'assets/icons/boss.png',
-              tip: '체력·방어가 매우 높고 코어를 통과하면 내구도 5를 깎습니다. 집속광·궤도 폭격 같은 방어 무시 화력이나 과부하·절대영도로 상대하세요.' },
+              tip: '체력·방어가 매우 높고 코어를 통과하면 내구도 5를 깎습니다. 레일건·궤도 폭격 같은 방어 무시 화력이나 집속광·과부하·절대영도로 상대하세요.' },
 };
 
 // rocks: [열, 행, 너비, 높이] — 지나갈 수도, 지을 수도 없는 지형 / hp: 맵별 적 체력 배율
@@ -230,7 +230,7 @@ function genWave(w, seed = 0) {
     if (!picks.includes(k)) picks.push(k);
   }
 
-  // 새 적이 처음 나오는 웨이브와 보스 웨이브에는 변이를 붙이지 않는다
+  // 기본 30웨이브에서는 새 적이 처음 나오는 웨이브와 보스 웨이브에 변이를 붙이지 않는다 (무한 모드는 매 웨이브 변이)
   // (주의: 표준 30웨이브의 구성은 이미 출시된 경험이다 — 변이 재배치는 봇 경제 궤적 전체를 흔들므로
   //  힐러·실드 겹침 완화는 구성 불변인 SHIELD_REGEN_DELAY로만 한다)
   const keys = Object.keys(MODS), roll = rnd();
